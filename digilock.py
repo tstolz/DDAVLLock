@@ -22,12 +22,16 @@ class digilock:
         try:#exeption handling: when something in the code between socket create and close happens, s.close() is executed anyway
             s.sendall(command+chr(13)+chr(10))
             time.sleep(0.1)
-            answer=self.recv_timeout(s,1)
+            answer=self.__recv_timeout(s,1)
+            #print answer
             indexi=answer.find(command[0:len(command)-1]+"=")+len(command)-1
-            answercut=answer[indexi+1:len(answer)].strip(chr(13)+chr(10)+'>')
+            answercut=answer[indexi+1:len(answer)]
+            indexe=answercut.find(chr(13)+chr(10)+'>')
+            answercut=answercut[:indexe]
         except:
             print "Unexpected error:", sys.exc_info()[0]
-        s.close()        
+        s.close()
+        #print answercut        
         return answercut
     def queryNUM(self, command):
         '''Send a query and interpret the result as numeric'''
@@ -41,7 +45,7 @@ class digilock:
         else:
             value=float(answercut)
         return value
-    def recv_timeout(self, the_socket, timeout=2):
+    def __recv_timeout(self, the_socket, timeout=2):
         the_socket.setblocking(0)
         total_data=[];data='';begin=time.time()
         while 1:
@@ -61,11 +65,13 @@ class digilock:
             except:
                 pass
         total_data=str(''.join(total_data))
-        print total_data
+        #print total_data
         return total_data
     def simplecommand(self, command):
         s=socket.create_connection((self.ip,self.port))
         s.sendall(command+chr(13)+chr(10))
+        time.sleep(0.1)
+        #print self.recv_timeout(s,2)
         s.close()
     def getoutputvoltage(self):
         command="scope:ch"+str(piezochan)+":mean?"
@@ -96,20 +102,20 @@ class digilock:
             command="scan:enable=false"
         else:
             print"boolean needed"
-        return self.query(command)
+        self.simplecommand(command)
     def getscopedata(self):
         command="scope:graph?"
         scope_data=self.query(command)
         #print scope_data
         #scope_data.split("/r/n")
-        print "this is the getscopedataoutput"
+        #print "this is the getscopedataoutput"
         scope_data_list=scope_data.split(chr(13)+chr(10))
-        print scope_data_list
+        #print scope_data_list
         scope_data_splitted=map(lambda x: x.split(chr(9)),scope_data_list)
-        del scope_data_splitted[-1]
+        #del scope_data_splitted[-1]
         scope_data_splitted_float=[map(float,x) for x in scope_data_splitted]#[:-1]
         scope_data_transposed=zip(*scope_data_splitted_float)
-        print scope_data_transposed
+        #print scope_data_transposed
         return scope_data_transposed
 
 D=digilock('localhost',60001)
