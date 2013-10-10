@@ -118,4 +118,4 @@ class digilock:
         #print scope_data_transposed
         return scope_data_transposed
 
-D=digilock('localhost',60001)
+#D=digilock('localhost',60001)
