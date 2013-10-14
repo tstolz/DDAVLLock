@@ -11,7 +11,9 @@ import time
 
 global threshold
 global max_offset
+global test_offset
 max_offset=30
+test_offset=5
 threshold=0.002
 
 
@@ -27,17 +29,22 @@ def findWavelength(digiLK, wavelengthMT, wavelength, factor=0):
     #calculate the needed offset where delta becomes zero
     #assuming linear dependence
     if not factor:
-        offset+=5.
+        #make sure we don't leave the range while testing
+        if offset<=max_offset-test_offset:
+            test=test_offset
+        else:
+            test=-test_offset
+        offset+=test
         digiLK.setoffset(offset)
         time.sleep(0.5)
         new_delta=wavelength-wavelengthMT.getWL()
-        factor=-(new_delta-delta)/5.
+        factor=-(new_delta-delta)/test
         print 'calculated a factor of %f' % factor
         if factor==0:
             print 'hardware error (zero factor)'
             return 0
         delta=new_delta
-    print delta
+    #print delta
     offset+=delta/factor
     #check if voltage out of range
     if abs(offset)>max_offset:
@@ -49,7 +56,7 @@ def findWavelength(digiLK, wavelengthMT, wavelength, factor=0):
     tmp=wavelengthMT.getWL()
     print 'set offset %f got wavelength %f' % (offset, tmp)
     new_delta=wavelength-tmp
-    print '%f nm to go' % new_delta
+    #print '%f nm to go' % new_delta
     if abs(new_delta)>=abs(delta):
         print 'failed (maybe threshold too low)'
         return 0
@@ -69,7 +76,7 @@ class DigiDummy:
     def getoffset(self):
         return self.offset
     def setoffset(self,offset):
-        self.laser.setWL(280*(1+0.01*offset**3))
+        self.laser.setWL(1014*(1+0.001*offset**3))
         self.offset=offset
 
 class WLMDummy:
@@ -82,5 +89,7 @@ class WLMDummy:
 
 D=digilock.digilock('localhost',60001)
 W=WLM.WavelengthMeter()
+W.setContinuous()
+W.setExpMode()
 WD=WLMDummy()
 DD=DigiDummy(WD)
