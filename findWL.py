@@ -90,6 +90,6 @@ class WLMDummy:
 D=digilock.digilock('localhost',60001)
 W=WLM.WavelengthMeter()
 W.setContinuous()
-W.setExpMode()
+W.setExpMode(True)
 WD=WLMDummy()
 DD=DigiDummy(WD)
