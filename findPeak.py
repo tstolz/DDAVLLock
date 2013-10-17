@@ -27,6 +27,14 @@ def simpleTest(x, a1, a2, a3):
     
 def findPeaks(data):
     ''' will return position of the five peaks (moving average method)'''
+    x=np.array(data[0])
+    y=np.array(data[1])
+    pts=len(y)
+    x_range=x[-1]
+    
+
+    
+
 
 def fitSpectrum(data):
     '''data[0] should contain x, data[1] y axis data'''
