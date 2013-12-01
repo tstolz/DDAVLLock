@@ -163,6 +163,7 @@ class broadSpectrum:
             
         print ParNames
         gr=dataprocessing.create_TGraph(data)
+        #insert signal dependent string into the TF1
         fit1=ROOT.TF1("fit1","pol1+gaus(2)+gaus(5)+gaus(8)+gaus(11)+gaus(14)", min(data[0]), max(data[0]))
         for i in range(len(ParNames)):
             fit1.SetParName(i, ParNames[i])
