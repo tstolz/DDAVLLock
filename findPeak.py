@@ -8,11 +8,12 @@ Created on Tue Oct 15 14:57:32 2013
 import numpy as np
 import matplotlib.pyplot as plt
 
-def findPeaks(data,win_len=31,show=False):
-    ''' will return position of the peaks (moving window method) - 
-    peaks are actually dips'''
+
+def findPeaks(data,level,drift,win_len=31,show=False):
+    ''' will return position of the peaks (zeros of first derivative) and their height and width.
+    level and drift of the signal help identify the peaks.'''
     x=np.array(data[0])
-    y=np.array(data[1])
+    y=np.array(data[1])-(level+drift*x)
     pts=len(data[0])
     profile=[0]    
     #profile is like the discrete derivative of data
@@ -28,50 +29,65 @@ def findPeaks(data,win_len=31,show=False):
     enhanced+=[0]*win_width
     enhanced=np.array(enhanced)
     #go through the spectrum from left to right
-    #memorizing values above (maxcnt) and below (mincnt)
-    #a threshold (thresh) until len(maxcnt) approx. len(mincnt)
-    #-> peak
-    #counts are deleted whenever values are ~0 for too long
-    thresh=enhanced.max()*0.2
-    mincnt=[]
-    maxcnt=[]
-    nocnt=0
-    lastcnt=1
+    #checking for values above and below 
+    #a threshold (thresh) until there is a jump in the sign of these values.
+    #find the zero points between the jumps, these are our peak-center-candidates
+    thresh=enhanced.max()*0.1
+    Ythresh=np.abs(x).max()*0.2
+    lastcnt=0
+    sgn=0
     PEAKS=[]
     for i in xrange(pts):
         val=enhanced[i]
-        if val<-thresh:
-            nocnt=0
-            if lastcnt==1:
-                mincnt=[]
-                maxcnt=[]
-            mincnt.append(i)
-            lastcnt=-1
-        elif val>thresh:
-            nocnt=0
-            lastcnt=1
-            maxcnt.append(i)
-        else:
-            nocnt+=1
-            if nocnt>len(mincnt) and nocnt>len(maxcnt):
-                mincnt=[]
-                maxcnt=[]
-            elif len(mincnt)==0 or len(maxcnt)==0:
-                pass
-            elif abs(len(mincnt)-len(maxcnt))/len(mincnt) < 0.2:
-                mins=np.array(mincnt)
-                maxs=np.array(maxcnt)  
-                index=int((mins.mean()+maxs.mean())/2)
-                PEAKS.append([x[index],y[index]])
-                mincnt=[]
-                maxcnt=[]
+        if abs(val)<thresh:
+            continue
+        sgntemp=np.sign(val)
+        if sgn==sgntemp or sgntemp==0:
+            lastcnt=i
+            continue
+        if not lastcnt:
+            lastcnt=i
+            sgn=sgntemp
+            continue
+        print sgntemp
+        
+        #determine the center of the peak
+        c=lastcnt+np.abs(y[lastcnt:i]).argmax()
+        #check if the peak has the right curvature for its sign and is not to flat
+        if y[c] < Ythresh:
+            continue
+        elif not np.sign(y[c]) == sgn:
+            continue
+        
+        #finally determine the width
+        left=0
+        right=0
+        j=1
+        while c-j>0 and c+j<pts:
+            if abs(y[c-j])<abs(y[c])/2 and not left:
+                left=c-j
+            if abs(y[c+j])<abs(y[c])/2 and not right:
+                right=c+j
+            if left and right:
+                break
+            j+=1
+        width=x[right]-x[left]
+        
+        PEAKS.append([y[c],x[c],width])        
+        
+        lastcnt=i
+        sgn=sgntemp
+        
+
                 
     PEAKS=np.array(PEAKS)
     if show:
         plt.subplot(121)
-        plt.plot(x,enhanced)
+        plt.plot(x,enhanced,'o')
         plt.subplot(122)
         plt.plot(x,y,PEAKS[:,0],PEAKS[:,1],'or')
         plt.show()
     return PEAKS
 
+data=np.load('testspec.npy')
+findPeaks(data,show=True)

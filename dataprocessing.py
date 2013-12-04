@@ -184,6 +184,7 @@ def create_TGraph(data): #source="digilock" to import live data, and "filename" 
     T2gr.SetLineWidth( 2 )
     T2gr.SetMarkerColor( 4 )
     T2gr.SetMarkerStyle( 21 )
+    T2gr.SetMarkerSize(0.1)
     T2gr.SetTitle( 'T2=[0]' )
     T2gr.GetXaxis().SetTitle( 'seconds' )
     T2gr.GetYaxis().SetTitle( 'Voltage' )
