@@ -16,6 +16,13 @@ max_offset=30
 test_offset=5
 threshold=0.002
 
+i=0
+while True:
+    
+    data=D.getscopedata()
+    np.savetxt('05_12_time%d.txt' % (i),data)
+    i+=1
+    time.sleep(1)
 
 def findWavelength(digiLK, wavelengthMT, wavelength, factor=0):
     '''factor is the proportionality wavelength/offset'''

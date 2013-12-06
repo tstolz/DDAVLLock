@@ -8,8 +8,7 @@ Created on Fri Aug 24 11:45:32 2012
 # fit quality parameter ausgeben damit man weiss ob alle fits sinnvoll sind ?DoNe?
 import digilock
 import math
-import ROOT
-from ROOT import gROOT, TCanvas, TGraph, gStyle, TMath
+from ROOT import gROOT, TCanvas, TGraph, gStyle, TMath, TF1
 from array import array
 import numpy
 
@@ -135,7 +134,7 @@ def errorsig(x,par):#when this function is changed, also change parnames in fit_
 def fit_errorsig(data, parameter=[0.001,0.05,0.002,0.001,0.055,-0.002,0.01], rangemin=0.03, rangemax=0.07, showgraphs=False):
     ParNames=["width1","x_offset1","amplitude1","width2","x_offset2","amplitude2","y offset"]
     gr=create_TGraph(data)
-    fit1=ROOT.TF1("fit1",errorsig, min(data[0]), max(data[0]), 7)
+    fit1=TF1("fit1",errorsig, min(data[0]), max(data[0]), 7)
     #fit1.SetParameters(0.001,0.05,0.002,0.001,0.055,0.002,0.01)
     for i in range(len(ParNames)):
         fit1.SetParName(i, ParNames[i])
@@ -179,7 +178,7 @@ def create_TGraph(data): #source="digilock" to import live data, and "filename" 
 #        data2=array("d", import_spectradata_from_file(source)[1])
     #data1=array("d",[1,2,3,4,5,6])
     #data2=array("d",[2,1,2,3,2,1])
-    T2gr=ROOT.TGraph(len(data[0]),data[0],data[1])
+    T2gr=TGraph(len(data[0]),data[0],data[1])
     T2gr.SetLineColor( 2 )
     T2gr.SetLineWidth( 2 )
     T2gr.SetMarkerColor( 4 )

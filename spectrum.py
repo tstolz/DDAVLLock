@@ -8,7 +8,7 @@ Created on Tue Oct 15 14:57:32 2013
 import numpy as np
 import matplotlib.pyplot as plt
 import time
-import ROOT
+from ROOT import TMath, TGraph, TF1
 import dataprocessing
 
 #voigt is not yet working, problem with amplitude!   
@@ -46,11 +46,11 @@ class Spectrum:
         result = level + x*drift + x**2 * curv
         for peak in peaks:
             if self.style=="gauss":
-                result += peak[0]*ROOT.TMath.Gaus(x,peak[1],peak[2])
+                result += peak[0]*TMath.Gaus(x,peak[1],peak[2])
             elif self.style=="lorentz":
-                result += peak[0]*ROOT.TMath.CauchyDist(x,peak[1],peak[2])
+                result += peak[0]*TMath.CauchyDist(x,peak[1],peak[2])
             elif self.style=="voigt":
-                result += peak[0]*ROOT.TMath.Voigt(x-peak[1],self.vratio*peak[2],(1-self.vratio)*peak[2])
+                result += peak[0]*TMath.Voigt(x-peak[1],self.vratio*peak[2],(1-self.vratio)*peak[2])
         return result
     def noisefit1(self):
         '''subtract the fitted signal from data and calc noiselevel of the rest'''
@@ -68,15 +68,16 @@ class Spectrum:
         self.noise_level=sigma
         return sigma
     def draw(self):
+        plt.ion()
         self.plot()
         plt.show()
     def plot(self):
         if self.params:
             #params=np.array(np.array(self.params[:-1])[:,1],dtype=float)
             Fit=[self.theory(x,self.params) for x in self.data[0]]
-            plt.plot(self.data[0],self.data[1],'o',self.data[0],Fit,'r')
+            plt.plot(self.data[0],self.data[1],'k,',self.data[0],Fit,'r-')
         else:
-            plt.plot(self.data[0],self.data[1],'o')
+            plt.plot(self.data[0],self.data[1],'k,')
     def guessMeanLevel(self, data):
         '''this algorithm is based on the assumption, that the most frequent 
         values in the signal are belonging to the level'''
@@ -112,11 +113,13 @@ class Spectrum:
     def guessParams(self,show=False):
         '''guess all the parameters required for the fit. order: level, drift, curvature, (height, center, width) of all peaks'''
         parameters=[]
-        level, drift=self.guessLevelDrift()
-        self.peaks=findPeaks(self.data,level,drift,show=show)
+        #level, drift=self.guessLevelDrift()
+        noPeaks=removePeaks(self.data)
+        curvature, drift, level = np.polyfit(*noPeaks,deg=2)
+        self.peaks=findPeaks(self.data,level,drift,curvature,show=show)
         #level is assumed to return the central signal level
         #we need the level on the left
-        parameters+=list([level,drift,0])
+        parameters+=list([level,drift,curvature])
         for peak in self.peaks:
             #the height and width (FWHM) has to be adjusted to the form of the curve
             if self.style=='gauss':
@@ -168,7 +171,7 @@ class Spectrum:
                 cmdstring+="+[%d]*TMath::CauchyDist(x,[%d],[%d])" % (3+i*3,4+i*3,5+i*3)
             elif self.style=="voigt":
                 cmdstring+="+[%d]*TMath::Voigt(x-[%d],[3]*[%d],(1-[3])*[%d])" % (4+i*3,5+i*3,6+i*3,6+i*3)
-        fit1=ROOT.TF1("fit1",cmdstring, min(data[0]), max(data[0]))
+        fit1=TF1("fit1",cmdstring, min(data[0]), max(data[0]))
         for i in range(len(ParNames)):
             fit1.SetParName(i, ParNames[i])
         for n in range(len(parameters)):
@@ -217,9 +220,11 @@ class DFSpec(Spectrum):
         if not self.isValid():
             print 'invalid spectrum'
             return 0
-        freq_diff=100
+        freq_diff=70
         scale=freq_diff/(self.peaks[4][1]-self.peaks[1][1])
         return (x-self.peaks[1][1])*scale
+    def getFirstPeak(self):
+        return [self.params[3],self.errors[3]]
     def getFrequencyError(self, x):
         return 0
         #to be filled! composed of uncertainty of freq_diff and peak errors
@@ -275,14 +280,33 @@ class DBSpec(Spectrum):
     
 #data=np.load('25_11_peakdipratio_mediumfocus.npy')
 #S=DFSpec(data)
-
-
-def findPeaks(data,level,drift,win_len=31,show=False):
-    ''' will return position of the peaks (zeros of first derivative) and their height and width.
-    level and drift of the signal help identify the peaks.'''
-    x=np.array(data[0])
-    y=np.array(data[1])-(level+drift*x)
+def removePeaks(data):
     pts=len(data[0])
+    y=np.array(data[1])
+    enhanced=enhancedDerivative(data)
+    thresh=np.abs(enhanced).max()*0.1
+    overcount=0
+    Yhist=[]
+    lastY=0
+    for i in xrange(pts):
+        if enhanced[i]>thresh:
+            y[i]=lastY
+            overcount+=3
+        elif enhanced[i]<-thresh:
+            y[i]=lastY
+            overcount-=3
+        elif overcount:
+            y[i]=lastY
+            overcount=np.sign(overcount)*(abs(overcount)-1)
+        else:
+            Yhist.append(y[i])
+            lastY=np.mean(Yhist[-pts/50:])
+    return np.array([data[0],y])
+
+def enhancedDerivative(data,win_len=31):
+    pts=len(data[0])
+    x=np.array(data[0])
+    y=np.array(data[1])
     profile=[0]    
     #profile is like the discrete derivative of data
     for i in xrange(pts-1):
@@ -295,13 +319,21 @@ def findPeaks(data,level,drift,win_len=31,show=False):
         window=np.array(profile[i-win_width:i+win_width])
         enhanced.append(window.sum())
     enhanced+=[0]*win_width
-    enhanced=np.array(enhanced)
+    return np.array(enhanced)    
+
+def findPeaks(data,level,drift,curvature=0,show=False):
+    ''' will return position of the peaks (zeros of first derivative) and their height and width.
+    level and drift of the signal help identify the peaks.'''
+    x=np.array(data[0])
+    y=np.array(data[1])-(level+drift*x+curvature*x**2)
+    pts=len(data[0])
+    enhanced=enhancedDerivative(data)
     #go through the spectrum from left to right
     #checking for values above and below 
     #a threshold (thresh) until there is a jump in the sign of these values.
     #find the zero points between the jumps, these are our peak-center-candidates
-    thresh=enhanced.max()*0.1
-    Ythresh=np.abs(y).max()*0.1
+    thresh=np.abs(enhanced).max()*0.1
+    Ythresh=np.abs(y).max()*0.2
     lastcnt=0
     sgn=0
     PEAKS=[]
