@@ -129,7 +129,6 @@ def loadLog(filename, listsep='\n', valsep=' '):
     raw_data=f.read()
     lists=[x.split(valsep) for x in raw_data.split(listsep)]
     numlists=len(lists)
-    print lists
     files, propNames = lists[:2]
     numprops=len(propNames)
     numparams=(numlists-2*numprops-2)/2
