@@ -4,6 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 mpl.rcParams['figure.subplot.hspace']=0.5
+mpl.rcParams['backend']='TkAgg'
 import Tkinter as tk
 import tkFileDialog as tkf
 import re
@@ -15,7 +16,10 @@ import re
 
 global prop
 
-prop=[DFSpec.getFirstPeak, DFSpec.noisefit1]
+prop=[DFSpec.lineDistance, DFSpec.symmetry199]
+
+#prevent plt from blocking
+plt.ion()
 
 #------------------UTILITY FUNCTIONS---------------------------
 def analization(dateien):
@@ -87,8 +91,9 @@ def analization(dateien):
         #create a new figure for the spectra if the current is full
         if j%20 == 0:
             plt.figure(figsize=(20,20))
-        plt.subplot(5,4,j%20+1)
-        s.plot()
+        axis=plt.subplot(5,4,j%20+1)
+        s.plot(axis)
+        plt.draw()
         j+=1
         
     #write the results to file
@@ -153,9 +158,6 @@ root.destroy()
 for i in xrange(len(dateien)):
     dateien[i]=dateien[i].replace('{','')
     dateien[i]=dateien[i].replace('}','')
-
-#prevent plt from blocking
-plt.ion()
 
 if len(dateien) == 1 and dateien[0].endswith('.log'):
     files, propNames, params, paramErrs, propVals, propErrs = loadLog(dateien[0])

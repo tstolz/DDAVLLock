@@ -2,29 +2,12 @@
 """
 Created on Thu Oct 10 09:04:31 2013
 
-@author: tom
+@author: Thomas Stolz
 """
 
-import digilock
-import WLM
 import time
 
-global threshold
-global max_offset
-global test_offset
-max_offset=30
-test_offset=5
-threshold=0.002
-
-i=0
-while True:
-    
-    data=D.getscopedata()
-    np.savetxt('05_12_time%d.txt' % (i),data)
-    i+=1
-    time.sleep(1)
-
-def findWavelength(digiLK, wavelengthMT, wavelength, factor=0):
+def findWavelength(digiLK, wavelengthMT, wavelength, factor=0, threshold=0.002, test_offset=5, max_offset=30):
     '''factor is the proportionality wavelength/offset'''
     #delta is the distance to the desired wavelength
     delta=wavelength-wavelengthMT.getWL()
@@ -94,9 +77,3 @@ class WLMDummy:
     def getWL(self):
         return self.WL
 
-D=digilock.digilock('localhost',60001)
-W=WLM.WavelengthMeter()
-W.setContinuous()
-W.setExpMode(True)
-WD=WLMDummy()
-DD=DigiDummy(WD)

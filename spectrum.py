@@ -71,13 +71,13 @@ class Spectrum:
         plt.ion()
         self.plot()
         plt.show()
-    def plot(self):
+    def plot(self,axis):
         if self.params:
             #params=np.array(np.array(self.params[:-1])[:,1],dtype=float)
             Fit=[self.theory(x,self.params) for x in self.data[0]]
-            plt.plot(self.data[0],self.data[1],'k,',self.data[0],Fit,'r-')
+            axis.plot(self.data[0],self.data[1],'k,',self.data[0],Fit,'r-')
         else:
-            plt.plot(self.data[0],self.data[1],'k,')
+            axis.plot(self.data[0],self.data[1],'k,')
     def guessMeanLevel(self, data):
         '''this algorithm is based on the assumption, that the most frequent 
         values in the signal are belonging to the level'''
@@ -115,7 +115,9 @@ class Spectrum:
         parameters=[]
         #level, drift=self.guessLevelDrift()
         noPeaks=removePeaks(self.data)
+
         curvature, drift, level = np.polyfit(*noPeaks,deg=2)
+
         self.peaks=findPeaks(self.data,level,drift,curvature,show=show)
         #level is assumed to return the central signal level
         #we need the level on the left
@@ -150,8 +152,9 @@ class Spectrum:
             
         if self.style=="voigt":
             parameters.insert(3,self.vratio)
+
+        ParNames=["level","drift","curvature"]        
         
-        ParNames=["level","drift","curvature"]
         if self.style=="voigt":
             ParNames.append("vratio")
         for i in xrange((len(parameters)-2)/3):
@@ -164,6 +167,7 @@ class Spectrum:
         # insert signal dependent string into the TF1
         # first create the string
         cmdstring="pol2"
+        
         for i in xrange(len(self.peaks)):
             if self.style=="gauss":
                 cmdstring+="+gaus(%d)" % (3+i*3)
@@ -203,6 +207,7 @@ class Spectrum:
             if i==3 and self.style=="voigt":
                 continue
             self.errors.append(errs[i])
+        
         self.ChiSquare=fit1.GetChisquare()
         print "Fit converged with ChiSquare: %f" % (self.ChiSquare)
         if showgraphs:        
@@ -223,8 +228,18 @@ class DFSpec(Spectrum):
         freq_diff=70
         scale=freq_diff/(self.peaks[4][1]-self.peaks[1][1])
         return (x-self.peaks[1][1])*scale
-    def getFirstPeak(self):
-        return [self.params[3],self.errors[3]]
+    def leftPeakCenter(self):
+        return [self.params[4],self.errors[4]]
+    def dipCenter(self):
+        return [self.params[7],self.errors[7]]
+    def rightPeakCenter(self):
+        return [self.params[10],self.errors[10]]
+    def leftRefCenter(self):
+        return [self.params[13],self.errors[13]]
+    def refLineCenter(self):
+        return [self.params[16],self.errors[16]]
+    def rightRefCenter(self):
+        return [self.params[19],self.errors[19]]
     def getFrequencyError(self, x):
         return 0
         #to be filled! composed of uncertainty of freq_diff and peak errors
@@ -265,6 +280,22 @@ class DFSpec(Spectrum):
         d=self.peaks[1][0]
         dE=self.errors[6]
         return [r/d,np.sqrt((rE/r)**2+(dE/d)**2)*abs(r/d)]
+    def lineDistance(self):
+        if not self.isValid():
+            print 'invalid spectrum'
+            return [0,0]
+        l, lErr = self.dipCenter()
+        r, rErr = self.refLineCenter()
+        return [r-l, np.sqrt(lErr**2+rErr**2)]
+    def symmetry199(self):
+        if not self.isValid():
+            print 'invalid spectrum'
+            return [0,0]
+        l = self.params[3]
+        lErr = self.errors[3]
+        r = self.params[9]
+        rErr = self.errors[9]
+        return [l/r, np.sqrt((lErr/l)**2+(rErr/r)**2)*abs(l/r)]
      
 class DBSpec(Spectrum):
     def isValid(self):
@@ -277,6 +308,8 @@ class DBSpec(Spectrum):
         derived from the distance between the isotope lines'''
         # need to lookup frequency differences first        
         pass
+    def getHg199Peak(self):
+        return self.peaks[0]
     
 #data=np.load('25_11_peakdipratio_mediumfocus.npy')
 #S=DFSpec(data)
