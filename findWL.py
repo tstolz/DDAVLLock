@@ -42,7 +42,7 @@ def findWavelength(digiLK, wavelengthMT, wavelength, factor=0, threshold=0.002, 
         return 0
     #set the voltage and check the result
     digiLK.setoffset(offset)
-    time.sleep(0.5)
+    time.sleep(1)
     tmp=wavelengthMT.getWL()
     print 'set offset %f got wavelength %f' % (offset, tmp)
     new_delta=wavelength-tmp
@@ -54,7 +54,7 @@ def findWavelength(digiLK, wavelengthMT, wavelength, factor=0, threshold=0.002, 
     if abs(new_delta)>threshold:
         #factor=factor*(new_delta-delta)/delta
         #print 'calculated a factor of %f' % factor                
-        findWavelength(digiLK, wavelengthMT, wavelength, factor)
+        findWavelength(digiLK, wavelengthMT, wavelength, factor, threshold, test_offset, max_offset)
     else:
         print 'wavelength successfully set'        
         return 1

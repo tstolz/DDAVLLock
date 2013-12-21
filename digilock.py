@@ -93,6 +93,9 @@ class digilock:
         command="scope:smooth:number="+str(points)
         self.simplecommand(command)
     def setscopetimescale(self,time):
+        '''time must be of the form "x u" where "x" is a number 
+        from (1,2,5,10,20,50,100,200,500) and "u" is a unit from
+        (s, ms, us)'''
         command="scope:timescale="+str(time)
         self.simplecommand(command)
     def switchscan(self,enable):

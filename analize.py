@@ -8,7 +8,14 @@ mpl.rcParams['backend']='TkAgg'
 import Tkinter as tk
 import tkFileDialog as tkf
 import re
+from uncertainties import ufloat
+from uncertainties.umath import sqrt
 
+# this is just temporary for measurements
+#for i in xrange(6):
+#    d=D.getscopedata()
+#    np.savetxt('focus4-5mm%d.txt' % (i), d)
+    
 #a list with the properties of interest. entries are from the DFSpec methods
 #or other supported functions
 #supported functions have to take one DFSpec argument and return either a value or
@@ -16,7 +23,11 @@ import re
 
 global prop
 
-prop=[DFSpec.lineDistance, DFSpec.symmetry199]
+prop=[DFSpec.leftPD_ratio, DFSpec.rightPD_ratio, DFSpec.symmetry199, DFSpec.leftZeemanSplitting, DFSpec.rightZeemanSplitting, DFSpec.leftPeakCenter]
+
+#if multiple measurement points shall be averaged for one property point
+#set this to something greater than 1
+numPoints=0
 
 #prevent plt from blocking
 plt.ion()
@@ -67,9 +78,12 @@ def analization(dateien):
         else:
             print 'unknown format '+ datei
             continue
-        files.append('...'+datei[-15:-4])
         s=DFSpec([data[3],data[1]])
-        s.fitSpectrum()
+        s.exactFit()
+        if not s.isValid():
+            print 'invalid spectrum, skipped: '+datei[-15:]
+            continue
+        files.append('...'+datei[-15:-4])
         specs.append(s)
         for i in xrange(len(s.params)):
             params[i].append(s.params[i])
@@ -91,8 +105,8 @@ def analization(dateien):
         #create a new figure for the spectra if the current is full
         if j%20 == 0:
             plt.figure(figsize=(20,20))
-        axis=plt.subplot(5,4,j%20+1)
-        s.plot(axis)
+        plt.subplot(5,4,j%20+1)
+        s.plot()
         plt.draw()
         j+=1
         
@@ -164,24 +178,46 @@ if len(dateien) == 1 and dateien[0].endswith('.log'):
 else:
     files, propNames, params, paramErrs, propVals, propErrs = analization(dateien)
 
-numspecs=len(files)
-numprop=len(propNames)
+
+#this part is for the case multiple measurements have been performed
+#with the same parameters -> set numpoints to this value
+if numPoints>1:
+    newpropVals=[]
+    newpropErrs=[]
+    #construct an array with values and errors using the uncertainties package
+    valNerr=[[ufloat(propVals[i][j],propErrs[i][j]) for j in xrange(len(propVals[i]))] for i in xrange(len(propVals))]
+    valNerr=np.array(valNerr)
+    for line in valNerr:
+        valtemp=[]
+        errtemp=[]
+        for i in xrange(len(line)/numPoints):
+            #temporary, this should be checked for correct propagation of errors!        
+            l=line[numPoints*i:numPoints*(i+1)]            
+            mean=l.mean()
+            std=sqrt(l.var())
+            valtemp.append(mean.n)
+            errtemp.append(std.n)
+        newpropVals.append(valtemp)
+        newpropErrs.append(errtemp)
+    propVals=newpropVals
+    propErrs=newpropErrs
+
 
 #create a figure for the parameters
 plt.figure(figsize=(20,20))
-#plot the properties
+#plot the parameters
 for i in xrange(len(params)):
     plt.subplot(5,5,i+1)
-    plt.errorbar(range(numspecs),params[i],paramErrs[i])
+    plt.errorbar(range(len(params[i])),params[i],paramErrs[i])
     #set the function name as plot title
     plt.title('Parameter %d' % (i))
 
 #create a figure for the evaluation of the given properties
 plt.figure(figsize=(20,20))
 #plot the properties
-for i in xrange(numprop):
-    plt.subplot(5,numprop/5+1,i+1)
-    plt.errorbar(range(numspecs),propVals[i],propErrs[i])
+for i in xrange(len(propVals)):
+    plt.subplot(5,len(propVals)/5+1,i+1)
+    plt.errorbar(range(len(propVals[i])),propVals[i],propErrs[i])
     #set the function name as plot title
     plt.title(propNames[i])
 

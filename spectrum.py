@@ -8,27 +8,29 @@ Created on Tue Oct 15 14:57:32 2013
 import numpy as np
 import matplotlib.pyplot as plt
 import time
-from ROOT import TMath, TGraph, TF1
-import dataprocessing
+from ROOT import TMath, TGraphErrors, TF1
 
 #voigt is not yet working, problem with amplitude!   
 class Spectrum:
     def __init__(self, data, style="lorentz"):
-        self.data=np.array(data)
+        self.data=np.asarray(data)
         self.peaks=None
         if not style in ["lorentz","gauss","voigt"]:
             print "unknown style, set to lorentz"
             self.style="lorentz"
         else:
             self.style=style
-        self.x_range=data[0].max()-data[0].min()
-        self.points=len(data[0])
-        self.ChiSquare=None
+        self.x_range=self.data[0].max()-self.data[0].min()
+        self.points=len(self.data[0])
+        self.ChiSquareRed=None
         self.params=None
         self.errors=None
         self.noise_level=None
         #ratio of the gaussian width in the voigt profile
         self.vratio=0.5
+        #indicator if the spectrum has been fitted yet
+        self.fitted=False
+        self.exact=False
     def setStyle(self,style):
         if not style in ["lorentz","gauss","voigt"]:
             print "unknown style"
@@ -36,9 +38,6 @@ class Spectrum:
             self.style=style
     def theory(self, x, params):
         '''params must have the form "level, drift, curvature, height1, center1, width1, ... heightN, centerN, widthN'''
-        #level, drift, w1, w2, w3, w4, w5, d1, d2, d3, d4, d5, c1, c2, c3, c4, c5 = params
-        #c1, c2, c3, c4, c5  = self.pk_centers
-        #params=list(params)
         level = params[0]
         drift = params[1]
         curv = params[2]
@@ -71,54 +70,29 @@ class Spectrum:
         plt.ion()
         self.plot()
         plt.show()
-    def plot(self,axis):
+    def plot(self):
         if self.params:
             #params=np.array(np.array(self.params[:-1])[:,1],dtype=float)
             Fit=[self.theory(x,self.params) for x in self.data[0]]
-            axis.plot(self.data[0],self.data[1],'k,',self.data[0],Fit,'r-')
+            plt.plot(self.data[0],self.data[1],'k,',self.data[0],Fit,'r-')
         else:
-            axis.plot(self.data[0],self.data[1],'k,')
-    def guessMeanLevel(self, data):
-        '''this algorithm is based on the assumption, that the most frequent 
-        values in the signal are belonging to the level'''
-        #calculate the stretching factor so we obtain a good statistic in bincount
-        #experience value: 100 for a range of 0 to 1        
-        factor=100/(np.max(data[1])-np.min(data[1]))
-        centiV=np.array(data[1]*factor,dtype=int)
-        #shift centiV to positive values so we can use bincount
-        centiVmin=centiV.min()
-        centiV-=centiVmin
-        freq=np.bincount(centiV)
-        maxfreq=[]
-        for i in xrange(7):
-            argmax=freq.argmax()
-            maxfreq.append(argmax)
-            freq[argmax]=0
-        mean=np.array(maxfreq).mean()
-        level=(mean+centiVmin)/factor
-        return level
-    def guessLevelDrift(self,steps=5):
-        #guess level in 'steps' parts of the spectrum and 
-        #do a linear fit
-        centers=[]
-        levels=[]        
-        for i in xrange(steps):
-            lowbound=i*int(self.points/steps)
-            upbound=(i+1)*int(self.points/steps)
-            region=self.data[:,lowbound:upbound]
-            centers.append(np.mean(region[0]))
-            levels.append(self.guessMeanLevel(region))
-        drift, level= np.polyfit(centers,levels,1)
-        return level,drift
-    def guessParams(self,show=False):
+            plt.plot(self.data[0],self.data[1],'k,')
+    def guessParams(self,numPeaks=None, show=False):
         '''guess all the parameters required for the fit. order: level, drift, curvature, (height, center, width) of all peaks'''
         parameters=[]
         #level, drift=self.guessLevelDrift()
         noPeaks=removePeaks(self.data)
 
         curvature, drift, level = np.polyfit(*noPeaks,deg=2)
-
-        self.peaks=findPeaks(self.data,level,drift,curvature,show=show)
+        
+        #estimate the best window lenght for "enhancedDerivative()"
+        #from the expected number of peaks
+        #calculation based on experience
+        if not numPeaks:
+            win_len=31
+        else:
+            win_len=self.points/(numPeaks*5)
+        self.peaks=findPeaks(self.data,level,drift,curvature,show=show,win_len=win_len)
         #level is assumed to return the central signal level
         #we need the level on the left
         parameters+=list([level,drift,curvature])
@@ -142,11 +116,28 @@ class Spectrum:
 #        parameters+=map(lambda i: level+drift*peaks[i,0]-peaks[i,1],xrange(len(peaks)))
 #        parameters+=self.pk_centers
         self.params=parameters
+        self.noisefit1()
         return parameters
-    def fitSpectrum(self, parameters=None, showgraphs=False):
+    def exactFit(self, parameters=None, showgraphs=False):
+        '''Fits the spectrum two times, first to get the correct
+        parameters and determine the noiselevel, then again to 
+        get correct error estimates based on the noiselevel. 
+        
+        The uncertainties are chosen in a way, that the reduced
+        chi-squared becomes ~1. By this we assume the theory 
+        function to be exact.'''
+        self.fit(parameters,showgraphs)
+        self.noisefit1()
+        self.exact=True
+        return self.fit(self.params, showgraphs)
+    def fit(self, parameters=None, showgraphs=False, verbose=False):
         '''data[0] must contain x-, data[1] y-axis data, parameters a guess of the 
         parameters in broadSpecTheory'''
-        data=np.array(self.data)
+        data=np.asarray(self.data,dtype=np.float64)
+        numpoints=len(data[0])
+        x_range=max(data[0])-min(data[0])
+        #the error estimate for the adc time values is half the stepwidth
+        xerr=x_range/numpoints*0.5
         if not parameters:
             parameters=self.guessParams()      
             
@@ -162,7 +153,7 @@ class Spectrum:
             ParNames.append("center%d" % i)
             ParNames.append("width%d" % i)
             
-        gr=dataprocessing.create_TGraph(data)
+        gr=create_TGraph(data, xerr, self.noise_level)
         
         # insert signal dependent string into the TF1
         # first create the string
@@ -189,7 +180,9 @@ class Spectrum:
             print 'fitting...'
         tm=time.time()
         gr.Fit(fit1, "Q","", data[0].min(), data[0].max())
-        print "Fitting time: %f s" % (time.time()-tm)
+        
+        if verbose:
+            print "Fitting time: %f s" % (time.time()-tm)
         
         self.params=[]
         pars=fit1.GetParameters()
@@ -208,8 +201,10 @@ class Spectrum:
                 continue
             self.errors.append(errs[i])
         
-        self.ChiSquare=fit1.GetChisquare()
-        print "Fit converged with ChiSquare: %f" % (self.ChiSquare)
+        self.ChiSquareRed=fit1.GetChisquare()/float(numpoints)
+        if verbose:
+            print "Fit converged with reduced chi-squared: %f" % (self.ChiSquareRed)
+        self.fitted=True        
         if showgraphs:        
             fit1.Draw()
         return fit1
@@ -246,7 +241,9 @@ class DFSpec(Spectrum):
     def isValid(self):
         if len(self.peaks)!=6:
             return False
-        if self.ChiSquare > 10:
+        if self.exact and abs(self.ChiSquareRed-1) > 0.3:
+            return False
+        if self.fitted and self.ChiSquareRed>30:
             return False
         #further possibilities for the spectrum to be invalid
         return True
@@ -298,6 +295,8 @@ class DFSpec(Spectrum):
         return [l/r, np.sqrt((lErr/l)**2+(rErr/r)**2)*abs(l/r)]
      
 class DBSpec(Spectrum):
+    def __init__(self,data):
+        Spectrum.__init__(self, data, style='gauss')
     def isValid(self):
         if not len(self.peaks)==5:
             return False
@@ -309,10 +308,13 @@ class DBSpec(Spectrum):
         # need to lookup frequency differences first        
         pass
     def getHg199Peak(self):
-        return self.peaks[0]
+        return self.peaks[0][1]
     
 #data=np.load('25_11_peakdipratio_mediumfocus.npy')
 #S=DFSpec(data)
+
+#--------------------UTILITY FUNCTIONS--------------------
+
 def removePeaks(data):
     pts=len(data[0])
     y=np.array(data[1])
@@ -354,19 +356,19 @@ def enhancedDerivative(data,win_len=31):
     enhanced+=[0]*win_width
     return np.array(enhanced)    
 
-def findPeaks(data,level,drift,curvature=0,show=False):
+def findPeaks(data,level,drift,curvature=0,show=False,win_len=31):
     ''' will return position of the peaks (zeros of first derivative) and their height and width.
     level and drift of the signal help identify the peaks.'''
     x=np.array(data[0])
     y=np.array(data[1])-(level+drift*x+curvature*x**2)
     pts=len(data[0])
-    enhanced=enhancedDerivative(data)
+    enhanced=enhancedDerivative(data,win_len)
     #go through the spectrum from left to right
     #checking for values above and below 
     #a threshold (thresh) until there is a jump in the sign of these values.
     #find the zero points between the jumps, these are our peak-center-candidates
     thresh=np.abs(enhanced).max()*0.1
-    Ythresh=np.abs(y).max()*0.2
+    Ythresh=np.abs(y).max()*0.1
     lastcnt=0
     sgn=0
     PEAKS=[]
@@ -494,3 +496,55 @@ def findDips(data,win_len=20,show=False):
         plt.plot(x,y,PEAKS[:,0],PEAKS[:,1],'or')
         plt.show()
     return PEAKS
+
+def create_TGraph(data,xerr,yerr):
+    n=len(data[0])    
+    x=np.asarray(data[0],dtype=np.float64)
+    y=np.asarray(data[1],dtype=np.float64)
+    xnoise=np.asarray([xerr]*n,dtype=np.float64)
+    ynoise=np.asarray([yerr]*n,dtype=np.float64)
+    T2gr=TGraphErrors(n,x,y,xnoise,ynoise)
+    T2gr.SetLineColor( 2 )
+    T2gr.SetLineWidth( 2 )
+    T2gr.SetMarkerColor( 4 )
+    T2gr.SetMarkerStyle( 21 )
+    T2gr.SetMarkerSize(0.1)
+    T2gr.SetTitle( 'Fit' )
+    T2gr.GetXaxis().SetTitle( 'Scan Voltage' )
+    T2gr.GetYaxis().SetTitle( 'Signal Voltage' )
+    return T2gr
+
+# the next two functions are old and no longer used
+def guessMeanLevel(data):
+    '''this algorithm is based on the assumption, that the most frequent 
+    values in the signal are belonging to the level'''
+    #calculate the stretching factor so we obtain a good statistic in bincount
+    #experience value: 100 for a range of 0 to 1        
+    factor=100/(np.max(data[1])-np.min(data[1]))
+    centiV=np.array(data[1]*factor,dtype=int)
+    #shift centiV to positive values so we can use bincount
+    centiVmin=centiV.min()
+    centiV-=centiVmin
+    freq=np.bincount(centiV)
+    maxfreq=[]
+    for i in xrange(7):
+        argmax=freq.argmax()
+        maxfreq.append(argmax)
+        freq[argmax]=0
+    mean=np.array(maxfreq).mean()
+    level=(mean+centiVmin)/factor
+    return level
+    
+def guessLevelDrift(data, steps=5):
+    '''guess level in 'steps' parts of the data and do a linear fit'''
+    centers=[]
+    levels=[]
+    points=len(data[0])        
+    for i in xrange(steps):
+        lowbound=i*int(points/steps)
+        upbound=(i+1)*int(points/steps)
+        region=data[:,lowbound:upbound]
+        centers.append(np.mean(region[0]))
+        levels.append(guessMeanLevel(region))
+    drift, level= np.polyfit(centers,levels,1)
+    return level,drift
