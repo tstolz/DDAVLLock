@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import time
 from ROOT import TMath, TGraphErrors, TF1
 
-#voigt is not yet working, problem with amplitude!   
+#voigt working now but slow!  
 class Spectrum:
     def __init__(self, data, style="lorentz"):
         self.data=np.asarray(data)
@@ -27,7 +27,7 @@ class Spectrum:
         self.errors=None
         self.noise_level=None
         #ratio of the gaussian width in the voigt profile
-        self.vratio=0.5
+        self.vratio=0
         #indicator if the spectrum has been fitted yet
         self.fitted=False
         self.exact=False
@@ -53,7 +53,7 @@ class Spectrum:
         return result
     def noisefit1(self):
         '''subtract the fitted signal from data and calc noiselevel of the rest'''
-        if self.params:
+        if not self.params==None:
             noise=self.data[1]-[self.theory(x,self.params) for x in self.data[0]]
             self.noise_level=np.sqrt(np.var(noise))
         else:
@@ -71,8 +71,7 @@ class Spectrum:
         self.plot()
         plt.show()
     def plot(self):
-        if self.params:
-            #params=np.array(np.array(self.params[:-1])[:,1],dtype=float)
+        if not self.params==None:
             Fit=[self.theory(x,self.params) for x in self.data[0]]
             plt.plot(self.data[0],self.data[1],'k,',self.data[0],Fit,'r-')
         else:
@@ -80,7 +79,7 @@ class Spectrum:
     def guessParams(self,numPeaks=None, show=False):
         '''guess all the parameters required for the fit. order: level, drift, curvature, (height, center, width) of all peaks'''
         parameters=[]
-        #level, drift=self.guessLevelDrift()
+
         noPeaks=removePeaks(self.data)
 
         curvature, drift, level = np.polyfit(*noPeaks,deg=2)
@@ -93,8 +92,7 @@ class Spectrum:
         else:
             win_len=self.points/(numPeaks*5)
         self.peaks=findPeaks(self.data,level,drift,curvature,show=show,win_len=win_len)
-        #level is assumed to return the central signal level
-        #we need the level on the left
+
         parameters+=list([level,drift,curvature])
         for peak in self.peaks:
             #the height and width (FWHM) has to be adjusted to the form of the curve
@@ -106,8 +104,10 @@ class Spectrum:
                 height=peak[0]*np.pi*width
             else:
                 #to be filled for voigt
-                height=peak[0]
+                #we begin estimation with vratio=0 so take 
+                #the lorentz case
                 width=peak[2]
+                height=peak[0]*np.pi*width/2
                 
             parameters.append(height)
             parameters.append(peak[1])
@@ -138,7 +138,7 @@ class Spectrum:
         x_range=max(data[0])-min(data[0])
         #the error estimate for the adc time values is half the stepwidth
         xerr=x_range/numpoints*0.5
-        if not parameters:
+        if parameters==None:
             parameters=self.guessParams()      
             
         if self.style=="voigt":
@@ -191,7 +191,12 @@ class Spectrum:
                 self.vratio=pars[i]
                 continue
             self.params.append(pars[i])
-            if i>2:
+            if i>2 :
+                if self.style=='voigt':
+                    if i==3:
+                        continue
+                    else:
+                        i-=1
                 self.peaks[(i-3)/3][i%3]=pars[i]
                 
         errs=fit1.GetParErrors()
@@ -212,6 +217,15 @@ class Spectrum:
 #------------------------Subclasses-------------------------------
 
 class DFSpec(Spectrum):
+    def plot(self):
+        if not self.isValid():
+            Spectrum.plot(self)
+            return
+        Fit=[self.theory(x,self.params) for x in self.data[0]]
+        plt.plot(self.getFrequency(self.data[0]),self.data[1],'k,',self.getFrequency(self.data[0]),Fit,'r-')
+        plt.xlabel('frequency [MHz]')
+        plt.ylabel('voltage [Hz]')
+        plt.grid(True)
     def getFrequency(self,x):
         '''return the associated frequency relative to the Hg-199 
         transition in MHz for an x-value,
@@ -220,9 +234,21 @@ class DFSpec(Spectrum):
         if not self.isValid():
             print 'invalid spectrum'
             return 0
-        freq_diff=70
+        freq_diff=97
         scale=freq_diff/(self.peaks[4][1]-self.peaks[1][1])
         return (x-self.peaks[1][1])*scale
+    def freq2volts(self,f):
+        '''convert detuning to voltage. inverts getFrequency'''
+        if not self.isValid():
+            print 'invalid spectrum'
+            return 0
+        freq_diff=97
+        scale=freq_diff/(self.peaks[4][1]-self.peaks[1][1])
+        return (f/scale+self.peaks[1][1])
+    def lockPointX(self):
+        return [self.freq2volts(8.8),0]
+    def lockPointY(self):
+        return [self.theory(self.freq2volts(8.8),self.params),0]
     def leftPeakCenter(self):
         return [self.params[4],self.errors[4]]
     def dipCenter(self):
@@ -239,6 +265,8 @@ class DFSpec(Spectrum):
         return 0
         #to be filled! composed of uncertainty of freq_diff and peak errors
     def isValid(self):
+        if not self.fitted:
+            return False
         if len(self.peaks)!=6:
             return False
         if self.exact and abs(self.ChiSquareRed-1) > 0.3:

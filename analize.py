@@ -23,7 +23,7 @@ from uncertainties.umath import sqrt
 
 global prop
 
-prop=[DFSpec.leftPD_ratio, DFSpec.rightPD_ratio, DFSpec.symmetry199, DFSpec.leftZeemanSplitting, DFSpec.rightZeemanSplitting, DFSpec.leftPeakCenter]
+prop=[DFSpec.lockPointX, DFSpec.lockPointY]
 
 #if multiple measurement points shall be averaged for one property point
 #set this to something greater than 1
@@ -79,7 +79,7 @@ def analization(dateien):
             print 'unknown format '+ datei
             continue
         s=DFSpec([data[3],data[1]])
-        s.exactFit()
+        s.fit()
         if not s.isValid():
             print 'invalid spectrum, skipped: '+datei[-15:]
             continue
