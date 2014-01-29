@@ -8,22 +8,27 @@ mpl.rcParams['backend']='TkAgg'
 import Tkinter as tk
 import tkFileDialog as tkf
 import re
+import os.path
 from uncertainties import ufloat
 from uncertainties.umath import sqrt
 
-# this is just temporary for measurements
-#for i in xrange(6):
-#    d=D.getscopedata()
-#    np.savetxt('focus4-5mm%d.txt' % (i), d)
-    
+#an example function, if the spectrum class doesn't contain a 
+#needed method
+def Slope(spec):
+    return spec.getSlope(spec.lockPointX()[0])
+
 #a list with the properties of interest. entries are from the DFSpec methods
 #or other supported functions
 #supported functions have to take one DFSpec argument and return either a value or
 #a list of the form [value, error]
-
 global prop
+prop=[DFSpec.lockPointX, DFSpec.lockPointY, Slope, DFSpec.lockPrecision, DFSpec.meanPeakWidth, DFSpec.getChiSquareRed]
 
-prop=[DFSpec.lockPointX, DFSpec.lockPointY]
+global fitstyle
+fitstyle='simplevoigt'
+
+global noise
+noise=0
 
 #if multiple measurement points shall be averaged for one property point
 #set this to something greater than 1
@@ -33,7 +38,7 @@ numPoints=0
 plt.ion()
 
 #------------------UTILITY FUNCTIONS---------------------------
-def analization(dateien):
+def analyzation(dateien):
     #list with names of the fitted files
     files=[]
     
@@ -64,6 +69,9 @@ def analization(dateien):
     
     #index for deciding when to begin a new plot
     j=0
+    
+    #variable to store noise level
+    noise=0
         
     for datei in dateien:
         print datei
@@ -79,16 +87,25 @@ def analization(dateien):
             print 'unknown format '+ datei
             continue
         s=DFSpec([data[3],data[1]])
+        s.setAlpha(0.01)
+        if j==0 and not noise:
+            s.fit()
+            s.noisefit1()
+            noise=s.noise_level
+        s.setStyle(fitstyle)
+        s.noise_level=noise
         s.fit()
+    
         if not s.isValid():
             print 'invalid spectrum, skipped: '+datei[-15:]
             continue
+
         files.append('...'+datei[-15:-4])
         specs.append(s)
         for i in xrange(len(s.params)):
             params[i].append(s.params[i])
             paramErrs[i].append(s.errors[i])
-            
+        
         #now get the desired properties
         for i in xrange(len(prop)):
             #prop[i] is a function or class method taking s as an argument
@@ -109,9 +126,12 @@ def analization(dateien):
         s.plot()
         plt.draw()
         j+=1
-        
+
+    #get the folder of the files
+    folder=os.path.dirname(dateien[0])+'/'
+    filename=folder+'_'.join([str(x) for x in time.localtime()[:6]])+'.log'
     #write the results to file
-    saveLog(files, propNames, params, paramErrs, propVals, propErrs)
+    saveLog(files, propNames, params, paramErrs, propVals, propErrs, filename)
 
     return files, propNames, params, paramErrs, propVals, propErrs
     
@@ -176,7 +196,7 @@ for i in xrange(len(dateien)):
 if len(dateien) == 1 and dateien[0].endswith('.log'):
     files, propNames, params, paramErrs, propVals, propErrs = loadLog(dateien[0])
 else:
-    files, propNames, params, paramErrs, propVals, propErrs = analization(dateien)
+    files, propNames, params, paramErrs, propVals, propErrs = analyzation(dateien)
 
 
 #this part is for the case multiple measurements have been performed

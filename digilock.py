@@ -73,6 +73,25 @@ class digilock:
         time.sleep(0.1)
         #print self.recv_timeout(s,2)
         s.close()
+    def setLockPoint(self,index):
+        command='autolock:display:cursor index='+str(index)
+        self.simplecommand(command)
+    def setAutolock(self,enable):
+        if enable:
+            command='autolock:lock:enable=true'
+        else:
+            command='autolock:lock:enable=false'
+        self.simplecommand(command)
+    def setPIDParameters(self,Gain,P,I,D,num):
+        '''num is the index of the PID controller (1 or 2)'''
+        base='pid'+str(num)
+        self.simplecommand(base+':gain='+str(Gain))
+        self.simplecommand(base+':proportional='+str(P))
+        self.simplecommand(base+':integral='+str(I))
+        self.simplecommand(base+':differential='+str(D))
+    def setPIDOutput(self,output,num):
+        '''num is the index of the PID controller (1 or 2)'''
+        self.simplecommand('pid'+str(num)+':output='+output)
     def getoutputvoltage(self):
         command="scope:ch"+str(piezochan)+":mean?"
         value=self.queryNUM(command)

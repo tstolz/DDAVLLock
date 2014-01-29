@@ -26,6 +26,11 @@ secs=3
 #maximum scan voltage for the digilock (absolute)
 maxvoltage=30
 
+#there are two tasks the digilock has to perform which need different
+#signal levels. 1. U1sig: to find the Hg199 doppler broadened peak the 
+#reference signal should dominate 2. U1flat: for locking the two signals 
+#should have the same level
+#The two settings of the signal box can be calibrated once and then be stored.
 U1sig=200
 U1flat=66
 
@@ -36,11 +41,7 @@ class DDAVLL_Controller:
     def __init__(self):
         self.digilock=digilock(digilock_ip,60001)
         self.WLM=WavelengthMeter()
-        self.box=SignalBox(box_port)
-        #idea: set different values for level and offset
-        #store the behaviour of the signal
-        #calculate the appropriate settings for the tasks
-        #broadSpec and fineSpec        
+        self.box=SignalBox(box_port)       
         self.U1Gain_flat=U1flat
         self.U1Gain_sig=U1sig
         
@@ -50,7 +51,43 @@ class DDAVLL_Controller:
         self.WLM.startMeasurement()
         
         #other configurations required for the lock
+    def lockDL(self,offset=-8.8,PID=1,Gain=2,P=1000,I=10,D=0):
+        '''offset is the detuning from resonance in MHz, PID
+        the number of the PID controller to use (1 or 2)
         
+        Gain, P, I, D -> PID-Parameters'''
+        self.optimizeLockSignal()
+        self.digilock.setPIDParameters(Gain,P,I,D,PID)
+        self.digilock.setPIDOutput('SC110 out',PID)
+        sig=self.digilock.getscopedata()
+        spec=DFSpec([sig[3],sig[1]])
+        print 'fitting...'
+        spec.fit()
+        print 'done'
+        #obtain the index of the X-lockPoint in the data-array
+        #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        #this should be done differently in the future!!!
+        #because the set point cannot be controlled!
+        lockindex=np.argmin(np.abs(spec.data[0]-spec.lockPointX()[0]))
+        print 'lockindex: '+str(lockindex)
+        self.digilock.setLockPoint(lockindex)
+        self.digilock.setAutolock(True)
+        print 'locking...'
+    def optimizeLockSignal(self):
+        self.digilock.setscanrange(0.5)
+        signal=self.digilock.getscopedata()
+        spec=DFSpec([signal[3],signal[1]])
+        #be prepared for narrow and thin peaks
+        spec.guessParams(numPeaks=6)
+        if not spec.isValid():
+            return 'Error: no fine spectrum obtained'
+        #zoom in further
+        left=spec.peaks[0][1]
+        right=spec.peaks[5][1]
+        center=(left+right)/2
+        rng=abs(left-right)*2
+        self.digilock.setoffset(center)
+        self.digilock.setscanrange(rng)
     def recordNoise(self, num):
         start=time.time()
         noise=np.array([[],[],[],[]])

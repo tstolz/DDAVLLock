@@ -2,22 +2,23 @@
 """
 Created on Tue Oct 15 14:57:32 2013
 
-@author: universe
+@author: Thomas Stolz
 """
 
 import numpy as np
 from scipy.special import erf
 import matplotlib.pyplot as plt
 import time
-from ROOT import TMath, TGraphErrors, TF1
+from ROOT import TMath, TGraph, TGraphErrors, TF1
 
 global wRatio
 #ratio of the Doppler width to the convoluted peak width (FWHM)
-wRatio=92.4065
+#depends on the linewidth of the laser and saturation or pressure broadening
+wRatio=50
+#can be calculated from doppler width (430 MHz) and fit params! 
 
-#voigt working now but slow!  
 class Spectrum:
-    def __init__(self, data, style="lorentz"):
+    def __init__(self, data, style="voigt"):
         self.data=np.asarray(data)
         self.peaks=None
         if not style in ["lorentz","gauss","voigt"]:
@@ -33,7 +34,9 @@ class Spectrum:
         self.noise_level=None
         #ratio of the gaussian width in the voigt profile
         self.vratio=0
+        self.vratioErr=0
         #indicator if the spectrum has been fitted yet
+        self.guessed=False
         self.fitted=False
         self.exact=False
     def setStyle(self,style):
@@ -42,7 +45,9 @@ class Spectrum:
         else:
             self.style=style
     def theory(self, x, params):
-        '''params must have the form "level, drift, curvature, height1, center1, width1, ... heightN, centerN, widthN'''
+        '''return the theory value at x for a spectrum with parameters "params"
+
+        params must have the form "level, drift, curvature, height1, center1, width1, ... heightN, centerN, widthN'''
         level = params[0]
         drift = params[1]
         curv = params[2]
@@ -57,8 +62,8 @@ class Spectrum:
                 result += peak[0]*TMath.CauchyDist(x,peak[1],peak[2]*0.5)
             elif self.style=="voigt":
                 #vratio is now the angle between the beams (after the theory...) 
-                #92.4065 is the ratio between the gaussian and the lorentzian width
-                result += peak[0]*TMath.Voigt(x-peak[1],self.vratio*wRatio*peak[2],peak[2])
+                #92.4065 is the ratio between the gaussian and the lorentzian width                
+                result += peak[0]*TMath.Voigt(x-peak[1],self.vratio*peak[2],peak[2])
         return result
     def noisefit1(self):
         '''subtract the fitted signal from data and calc noiselevel of the rest'''
@@ -81,17 +86,40 @@ class Spectrum:
         plt.show()
     def plot(self):
         if not self.params==None:
-            Fit=[self.theory(x,self.params) for x in self.data[0]]
-            plt.plot(self.data[0],self.data[1],'k,',self.data[0],Fit,'r-')
+            Fit=np.asarray([self.theory(x,self.params) for x in self.data[0]])
+            plt.plot(self.data[0],self.data[1],'k,',self.data[0],Fit,'r-',self.data[0],self.data[1]-Fit,'g-')
         else:
             plt.plot(self.data[0],self.data[1],'k,')
-    def guessParams(self,numPeaks=None, show=False):
+    def peaksToParams(self):
+        '''convert the previously obtained peak values to fit parameter values.
+        As guessParams returns the absolute height and FWHM of the peaks, these
+        values have to be converted for some line shapes.'''
+        for peak in self.peaks:
+            #height and width (FWHM) have to be adjusted to the form of the curve
+            if self.style=='gauss':
+                #not yet FWHM
+                width=peak[2]/(2*np.sqrt(2*np.log(2)))
+                height=peak[0]
+            elif self.style=='lorentz' or self.vratio==0:
+                width=peak[2]
+                height=peak[0]*np.pi*width*0.5
+            elif self.style=='voigt':
+                #the following are approximations taken from 
+                #Zing-Qiao et al., adapted to our case
+                width=2*peak[2]/(1.0692 + np.sqrt(0.86639 + 4*8 * np.log(2) * self.vratio**2))
+                height=peak[0]*np.sqrt(2*np.pi)*self.vratio*width/(np.exp(0.5*(2*self.vratio)**(-2))*(1-erf(1/(2*np.sqrt(2)*self.vratio))))
+            self.params.append(height)
+            self.params.append(peak[1])
+            self.params.append(width)
+            
+    def guessParams(self,numPeaks=6, show=False):
         '''guess all the parameters required for the fit. order: level, drift, curvature, (height, center, width) of all peaks'''
-        parameters=[]
+        self.params=[]
 
         noPeaks=removePeaks(self.data)
 
         curvature, drift, level = np.polyfit(*noPeaks,deg=2)
+        self.params+=list([level,drift,curvature])
         
         #estimate the best window lenght for "enhancedDerivative()"
         #from the expected number of peaks
@@ -101,33 +129,11 @@ class Spectrum:
         else:
             win_len=self.points/(numPeaks*5)
         self.peaks=findPeaks(self.data,level,drift,curvature,show=show,win_len=win_len)
-
-        parameters+=list([level,drift,curvature])
-        for peak in self.peaks:
-            #the height and width (FWHM) has to be adjusted to the form of the curve
-            if self.style=='gauss':
-                #not yet FWHM
-                width=peak[2]/(2*np.sqrt(2*np.log(2)))
-                height=peak[0]
-            elif self.style=='lorentz' or self.vratio==0:
-                width=peak[2]
-                height=peak[0]*np.pi*width*0.5
-            else:
-                #the following are approximations taken from 
-                #Zing-Qiao et al., adapted to our case
-                
-                width=2*peak[2]/(1.0692 + np.sqrt(0.86639 + 4*8 * np.log(2) * wRatio**2 * self.vratio**2))
-                height=peak[0]*np.sqrt(2*np.pi)*self.vratio*wRatio*width/(np.exp(0.5*(2*self.vratio*wRatio)**(-2))*(1-erf(1/(2*np.sqrt(2)*self.vratio*wRatio))))
-                
-            parameters.append(height)
-            parameters.append(peak[1])
-            parameters.append(width)
-#        parameters+=list([rng*0.02]*5)
-#        parameters+=map(lambda i: level+drift*peaks[i,0]-peaks[i,1],xrange(len(peaks)))
-#        parameters+=self.pk_centers
-        self.params=parameters
-        self.noisefit1()
-        return parameters
+        
+        self.peaksToParams()
+        self.guessed=True
+        return self.params
+    
     def exactFit(self, parameters=None, showgraphs=False):
         '''Fits the spectrum two times, first to get the correct
         parameters and determine the noiselevel, then again to 
@@ -140,9 +146,81 @@ class Spectrum:
         self.noisefit1()
         self.exact=True
         return self.fit(self.params, showgraphs)
-    def fit(self, parameters=None, showgraphs=False, verbose=False):
-        '''data[0] must contain x-, data[1] y-axis data, parameters a guess of the 
-        parameters in broadSpecTheory'''
+        
+    def createCmdString(self):
+        '''Create the theory function string for the ROOT fit.'''
+        if self.style=='gauss':
+            cmdstring="pol2"
+            for i in xrange(len(self.peaks)):
+                cmdstring+="+gaus(%d)" % (3+i*3)
+        elif self.style=='lorentz':
+            cmdstring="pol2"
+            for i in xrange(len(self.peaks)):
+                cmdstring+="+[%d]*TMath::CauchyDist(x,[%d],[%d]*0.5)" % (3+i*3,4+i*3,5+i*3)
+        elif self.style=='voigt':
+            cmdstring="pol2"
+            for i in xrange(len(self.peaks)):
+                cmdstring+="+[%d]*TMath::Voigt(x-[%d],[3]*[%d],[%d])" % (4+i*3,5+i*3,6+i*3,6+i*3)
+        
+        return cmdstring
+        
+    def createParLists(self,parameters):
+        '''Create two lists with the fit parameters and their names,
+        that are passed to the ROOT fit.'''
+        ParList=list(parameters)
+        
+        if self.style=="voigt":
+            ParList.insert(3,self.vratio)
+
+        ParNames=["level","drift","curvature"]        
+        
+        if self.style=="voigt":
+            ParNames.append("vratio")
+
+        for i in xrange((len(parameters)-3)/3):
+            ParNames.append("height%d" % i)  
+            ParNames.append("center%d" % i)
+            ParNames.append("width%d" % i)
+        
+        return ParList, ParNames
+        
+    def processFitResults(self, pars, errs):
+        '''Fills self.params, self.peaks and self.errors with the fit results.
+        For voigt profiles also the vratio has to be extracted and stored 
+        in self.vratio. Similar things can happen in subclasses, where this
+        function is overridden.'''
+        self.params=[]
+        self.errors=[]
+        if self.style=='gauss' or self.style=='lorentz':
+            numpars=3+3*len(self.peaks)
+            for i in xrange(numpars):
+                if i>2:
+                    self.peaks[(i-3)/3][i%3]=pars[i]
+                self.params.append(pars[i])
+                
+        elif self.style=='voigt':
+            numpars=3+1+3*len(self.peaks)
+            for i in xrange(numpars):
+                if i>2:
+                    if i==3:
+                        self.vratio=pars[i]
+                        continue
+                    else:
+                        j=i-1
+                        self.peaks[(j-3)/3][j%3]=pars[i]
+                self.params.append(pars[i])
+            
+        for i in xrange(numpars):
+            if i==3 and self.style=="voigt":
+                self.vratioErr=errs[i]
+                continue
+            self.errors.append(errs[i])
+                    
+    def fit(self, parameters=None, showgraphs=False, verbose=False, quiet=False):
+        '''Fits the spectrum with initial values "parameters". If None are given,
+        the parameters are guessed first. Showgraphs displays the guessed curve
+        before the fit. Verbose sets the "v" flag when calling the ROOT fit. 
+        If "quiet" is False, the fit time and reduced chi-squared are printed.'''
         data=np.asarray(self.data,dtype=np.float64)
         numpoints=len(data[0])
         x_range=max(data[0])-min(data[0])
@@ -150,145 +228,353 @@ class Spectrum:
         xerr=x_range/numpoints*0.5
         if parameters==None:
             parameters=self.guessParams()      
-            
-        if self.style=="voigt":
-            parameters.insert(3,self.vratio)
-
-        ParNames=["level","drift","curvature"]        
         
-        if self.style=="voigt":
-            ParNames.append("vratio")
-        for i in xrange((len(parameters)-2)/3):
-            ParNames.append("height%d" % i)  
-            ParNames.append("center%d" % i)
-            ParNames.append("width%d" % i)
-            
-        gr=create_TGraph(data, xerr, self.noise_level)
-        
-        # insert signal dependent string into the TF1
+        # insert signal and style dependent string into the TF1
         # first create the string
-        cmdstring="pol2"
+        cmdstring=self.createCmdString()
         
-        for i in xrange(len(self.peaks)):
-            if self.style=="gauss":
-                cmdstring+="+gaus(%d)" % (3+i*3)
-            elif self.style=="lorentz":
-                cmdstring+="+[%d]*TMath::CauchyDist(x,[%d],[%d]*0.5)" % (3+i*3,4+i*3,5+i*3)
-            elif self.style=="voigt":
-                cmdstring+="+[%d]*TMath::Voigt(x-[%d],[3]*%f*[%d],[%d])" % (4+i*3,5+i*3,wRatio,6+i*3,6+i*3)
+        # create lists with initial parameters and their names
+        ParList, ParNames = self.createParLists(parameters)
+        
+        gr=create_TGraph(data, xerr, self.noise_level)
         fit1=TF1("fit1",cmdstring, min(data[0]), max(data[0]))
         for i in range(len(ParNames)):
             fit1.SetParName(i, ParNames[i])
-        for n in range(len(parameters)):
-            fit1.SetParameter(n,parameters[n])
-        #fit1.SetParLimits(1,0.045,0.05)
-        #fit1.SetParLimits(4,0.052,0.06)
+        for n in range(len(ParList)):
+            fit1.SetParameter(n,ParList[n])
+        
+        # we could set limits for the parameters here if we want        
+        
         if showgraphs:
             gr.Draw()
-            #print parameter
+            #print initial curve
             raw_input("pre fit, press any key")
             print 'fitting...'
+            
         tm=time.time()
         if verbose:
             opt="VNEX0"
         else:
             opt="QNEX0"
+        # Tell root to do the fit. This can take some minutes.
         gr.Fit(fit1, opt,"", data[0].min(), data[0].max())
         
-        if verbose:
+        if not quiet:
             print "Fitting time: %f s" % (time.time()-tm)
         
-        self.params=[]
         pars=fit1.GetParameters()
-        for i in xrange(len(parameters)):
-            if i>2 :
-                if self.style=='voigt':
-                    if i==3:
-                        self.vratio=pars[i]
-                        continue
-                    else:
-                        j=i-1
-                        self.peaks[(j-3)/3][j%3]=pars[i]
-                else:
-                    self.peaks[(i-3)/3][i%3]=pars[i]
-            self.params.append(pars[i])
-                
         errs=fit1.GetParErrors()
-        self.errors=[]
-        for i in xrange(len(parameters)):
-            if i==3 and self.style=="voigt":
-                continue
-            self.errors.append(errs[i])
+        # store the obtained fit parameters according to the style
+        self.processFitResults(pars,errs)
         
         self.ChiSquareRed=fit1.GetChisquare()/float(numpoints)
-        if verbose:
+        if not quiet:
             print "Fit converged with reduced chi-squared: %f" % (self.ChiSquareRed)
         self.fitted=True        
         if showgraphs:        
             fit1.Draw()
         return fit1
 
+
 #------------------------Subclasses-------------------------------
 
 class DFSpec(Spectrum):
-    def plot(self):
+    '''Subclass for the DDAVLL. Includes special styles, where the
+    peak widths are fixed, as these should all be the same in the lock
+    spectrum. Also utility functions to obtain properties of the spectrum,
+    especially the lock point and its error.'''
+    def __init__(self,data,style='simplelorentz',freq_diff=97, freq_err=0.18):
+        '''freq_diff is the isotope shift in MHz, freq_err its fractional error'''        
+        Spectrum.__init__(self, data)
+        self.setStyle(style)
+        self.freq_diff=freq_diff
+        self.freq_err=freq_err
+    def setStyle(self, style):
+        '''"style" should be one of 
+        
+        simplevoigt: voigt profiles with equal peak widths
+        simplelorentz: lorentz profiles with equal peak widths
+        fixedvoigt: voigt profiles with a fixed gauss-lorentz-ratio
+        
+        General styles from superclass are also possible.'''
+        
+        if not style in ["simplevoigt","simplelorentz","fixedvoigt"]:
+            Spectrum.setStyle(self,style)
+        else:
+            self.style=style
+            
+    def setAlpha(self,alpha):
+        '''Set the gauss-lorentz-ratio assuming an angle alpha between 
+        the beams.'''
+        self.vratio=alpha*wRatio
+    def plot(self,underground=True):
+        '''Valid spectra are plotted with theory curve in red,
+        data points in black and signal underground in green. The x-axis
+        is in MHz.'''
         if not self.isValid():
             Spectrum.plot(self)
             return
-        Fit=[self.theory(x,self.params) for x in self.data[0]]
-        plt.plot(self.getFrequency(self.data[0]),self.data[1],'k,',self.getFrequency(self.data[0]),Fit,'r-')
+        Fit=np.asarray([self.theory(x,self.params) for x in self.data[0]])
+        xaxis=self.getFrequency(self.data[0])
+        if underground:
+            plt.plot(xaxis,self.data[1],'k,',xaxis,Fit,'r-',xaxis,self.data[1]-Fit,'g-')
+        plt.plot(xaxis,self.data[1],'k,',xaxis,Fit,'r-')
         plt.xlabel('frequency [MHz]')
-        plt.ylabel('voltage [Hz]')
+        plt.ylabel('diode signal [V]')
         plt.grid(True)
-    def getFrequency(self,x):
+    def theory(self, x, params):
+        '''return the theory value at x for a spectrum with parameters "params"
+
+        params must have the form "level, drift, curvature, height1, center1, width1, ... heightN, centerN, widthN'''
+        if not self.style in ["simplevoigt","simplelorentz","fixedvoigt"]:
+            return Spectrum.theory(self,x,params)
+
+        level = params[0]
+        drift = params[1]
+        curv = params[2]
+        peaks = [[params[i],params[i+1],params[i+2]] for i in range(3,len(params),3)]
+        result = level + x*drift + x**2 * curv
+        for peak in peaks:
+            if self.style=="simplevoigt":
+                #this approximation of a voigt profile with fixed height
+                #is good for vratio < 1.5 with less than 2 % error                   
+                result += peak[0]*peak[2]/(0.637-0.255*self.vratio-0.998*self.vratio**2+1.78*self.vratio**3-1.15*self.vratio**4+0.265*self.vratio**5)*TMath.Voigt(x-peak[1],self.vratio*peak[2],peak[2])
+            elif self.style=="simplelorentz":
+                #ROOT defined the CauchyDist with HWHM and Voigt with FWHM
+                #so we get a factor 0.5 in front of peak[2] (FWHM)
+                result += peak[0]*TMath.CauchyDist(x,peak[1],peak[2]*0.5)        
+        return result
+    def getFrequency(self,x,pars=None):
         '''return the associated frequency relative to the Hg-199 
         transition in MHz for an x-value,
         derived from the distance between the isotope lines'''
-        #TO BE LOOKED UP! This is a rough estimate.
+        if type(pars)==type(None):
+            pars=self.params
         if not self.isValid():
             print 'invalid spectrum'
             return 0
-        freq_diff=97
-        scale=freq_diff/(self.peaks[4][1]-self.peaks[1][1])
-        return (x-self.peaks[1][1])*scale
-    def freq2volts(self,f):
+        scale=self.freq_diff/(pars[16]-pars[7])
+        return (x-pars[7])*scale
+    def freq2volts(self,f,pars=None):
         '''convert detuning to voltage. inverts getFrequency'''
+        if type(pars)==type(None):
+            pars=self.params
         if not self.isValid():
             print 'invalid spectrum'
             return 0
-        freq_diff=97
-        scale=freq_diff/(self.peaks[4][1]-self.peaks[1][1])
-        return (f/scale+self.peaks[1][1])
-    def lockPointX(self):
-        return [self.freq2volts(-8.8),0]
-    def lockPointY(self):
-        return [self.theory(self.freq2volts(-8.8),self.params),0]
-    def leftPeakCenter(self):
-        return [self.params[4],self.errors[4]]
-    def dipCenter(self):
-        return [self.params[7],self.errors[7]]
-    def rightPeakCenter(self):
-        return [self.params[10],self.errors[10]]
-    def leftRefCenter(self):
-        return [self.params[13],self.errors[13]]
-    def refLineCenter(self):
-        return [self.params[16],self.errors[16]]
-    def rightRefCenter(self):
-        return [self.params[19],self.errors[19]]
+        scale=self.freq_diff/(pars[16]-pars[7])
+        return (f/scale+pars[7])
+    def lockPointX(self,freq=-8.8):
+        freq=float(freq)
+        err=np.sqrt((1-freq/self.freq_diff)**2*self.errors[7]**2 + (freq/self.freq_diff)**2 * self.errors[16]**2 + (freq/self.freq_diff)**2 * (self.params[16]-self.params[7])**2 * self.freq_err**2)
+        return [self.freq2volts(freq),err]
+    def lockPointY(self,freq=-8.8):
+        '''calculates the lock point (y-axis) for a frequency detuning "freq"
+        and the associated error for a relative error in that frequency "freq_err" '''
+        #lockPointY
+        lPY=self.theory(self.freq2volts(freq),self.params)
+        #the function for the error-calculation
+        F=lambda x: self.theory(self.freq2volts(freq,pars=x),x)
+        
+        #calculate the error by quadratically adding the errors
+        #caused by the parameter errors. Instead of partial derivatives
+        #we directly evaluate the function. 
+        squaredsum=0
+        pars=np.asarray(self.params)
+        errs=np.asarray(self.errors)
+        num=len(pars)
+        for i in xrange(num):
+            #print F(pars+np.eye(num)[i]*errs)
+            squaredsum+=max([(lPY-F(pars+np.eye(num)[i]*errs*j))**2 for j in (1,-1)])
+        squaredsum+=max([(lPY-self.theory(self.freq2volts(freq*(1+self.freq_err*j)),self.params))**2 for j in (1,-1)])
+        err=np.sqrt(squaredsum)
+        return [lPY,err]
+    def getSlope(self,x):
+        '''calculate the slope of the theory curve at x'''
+        dx=self.x_range/self.points*0.001
+        dy=self.theory(x+dx,self.params)-self.theory(x,self.params)
+        return dy/dx
+    def lockPrecision(self,freq=-8.8):
+        '''returns the systematic uncertainty of a possible lock at
+        frequency "freq"'''
+        yerr=self.lockPointY(freq)[1]
+        freq_err=self.getFrequency(self.peaks[1][1]+abs(yerr/self.getSlope(self.lockPointX(freq)[0])))
+        return freq_err
     def getFrequencyError(self, x):
-        return 0
+        x1=self.params[16]
+        x0=self.params[7]
+        fq=self.freq_diff
+        err=np.sqrt(self.freq_err**2 * ((x-x0)/(x1-x0))**2 + self.errors[7]**2 * (fq*(x-x1)/(x0-x1)**2)**2 + self.errors[16]**2 * (fq*(x-x0)/(x1-x0)**2)**2)
+        return err
         #to be filled! composed of uncertainty of freq_diff and peak errors
+    def getChiSquareRed(self):
+        return [self.ChiSquareRed,0]
     def isValid(self):
-        if not self.fitted:
+        '''Checks, if the spectrum has the right number of peaks and, if
+        it has been fitted, whether the fit was successful.'''
+        if not self.guessed:
             return False
         if len(self.peaks)!=6:
             return False
-        if self.exact and abs(self.ChiSquareRed-1) > 0.3:
+        if self.exact and abs(self.ChiSquareRed-1) > 0.9:
             return False
         if self.fitted and self.ChiSquareRed>30:
             return False
         #further possibilities for the spectrum to be invalid
         return True
+    def alpha(self):
+        '''Give an estimate of the angle between the beams. Only
+        reasonable if style is simplevoigt.'''
+        wRatio=430/self.meanPeakWidth()[0]
+        return [self.vratio/wRatio, self.vratioErr/wRatio]
+    def peaksToParams(self):
+        #if too many peaks remove the weakest until 6 peaks
+        while len(self.peaks)>6:
+            heights=np.abs(np.asarray(self.peaks).T[0])
+            self.peaks=np.delete(self.peaks,heights.argmin(),0)
+        
+        if not self.style in ["simplevoigt","simplelorentz","fixedvoigt"]:
+            Spectrum.peaksToParams(self)
+            return
+        
+        #the following approximation for the width of voigt profiles 
+        #is taken from Zing-Qiao et al., adapted to our case
+        FWHM=[]
+        for peak in self.peaks:
+            FWHM.append(peak[2])
+        FWHM=np.mean(FWHM)
+        
+        if self.style=='simplevoigt' or self.style=='fixedvoigt':
+            width=2*FWHM/(1.0692 + np.sqrt(0.86639 + 4*8 * np.log(2) * self.vratio**2))
+        elif self.style=='simplelorentz':
+            width=FWHM
+        
+        for peak in self.peaks:
+            if self.style=='simplevoigt' or self.style=='fixedvoigt':
+                height=peak[0]
+            elif self.style=='simplelorentz':
+                height=peak[0]*np.pi*width*0.5
+            self.params.append(height)
+            self.params.append(peak[1])
+            self.params.append(width)
+        
+    def createCmdString(self):
+        if self.style=='simplevoigt':
+            cmdstring="pol2"
+            for i in xrange(len(self.peaks)):
+                #this approximation of a voigt profile with fixed height
+                #is good for vratio < 1.5 with less than 2 % error            
+                cmdstring+="+[%d]*[4]/(0.637-0.255*[3]-0.998*[3]*[3]+1.78*[3]*[3]*[3]-1.15*[3]*[3]*[3]*[3]+0.265*[3]*[3]*[3]*[3]*[3])*TMath::Voigt(x-[%d],[3]*[4],[4])" % (5+i*2,6+i*2)
+        elif self.style=='simplelorentz':
+            cmdstring="pol2"
+            for i in xrange(len(self.peaks)):
+                cmdstring+="+[%d]*TMath::CauchyDist(x,[%d],[3]*0.5)" % (4+i*2,5+i*2)
+        else:
+            cmdstring=Spectrum.createCmdString(self)
+        
+        return cmdstring
+        
+    def createParLists(self,parameters):
+        if self.style=='simplevoigt' or self.style=='simplelorentz':
+            ParList=list(parameters)
+            #calculate the mean width
+            width=[]
+            i=5
+            while i<len(ParList):
+                width.append(ParList.pop(i))
+                i+=2
+            width=np.mean(width)
+            if self.style=='simplevoigt':
+                ParList.insert(3,self.vratio)
+                ParList.insert(4,width)
+            elif self.style=='simplelorentz':
+                ParList.insert(3,width)
+                
+            ParNames=["level","drift","curvature"]        
+            
+            if self.style=='simplevoigt':            
+                ParNames.append("vratio")
+            ParNames.append("width")
+            for i in xrange((len(parameters)-3)/3):
+                ParNames.append("height%d" % i)  
+                ParNames.append("center%d" % i)   
+                
+        else:
+            ParList, ParNames=Spectrum.createParLists(self,parameters)
+        
+        return ParList, ParNames
+        
+    def processFitResults(self, pars, errs):
+        if self.style=='simplevoigt':
+            numpars=3+2+2*len(self.peaks)
+            self.params=[]
+            self.errors=[]
+            for i in xrange(numpars):
+                if i==3:
+                    self.vratio=pars[i]
+                    continue
+                elif i==4:
+                    width=pars[4]
+                    continue
+                elif i>4:
+                    j=i-2
+                    self.peaks[(j-3)/2][(j-3)%2]=pars[i]
+                    if i%2==0:
+                        self.peaks[(j-3)/2][2]=width
+                        self.params.append(pars[i])
+                        self.params.append(width)
+                        continue
+                self.params.append(pars[i])
+            
+            for i in xrange(numpars):
+                if i==3:
+                    self.vratioErr=errs[i]
+                    continue
+                elif i==4:
+                    widthErr=errs[4]
+                    continue
+                self.errors.append(errs[i])
+                if i>4 and i%2==0:
+                    self.errors.append(widthErr)
+                    
+        elif self.style=='simplelorentz':
+            numpars=3+1+2*len(self.peaks)
+            self.params=[]
+            self.errors=[]
+            for i in xrange(numpars):
+                if i==3:
+                    width=pars[i]
+                    continue
+                elif i>4:
+                    j=i-1
+                    self.peaks[(j-3)/2][(j-3)%2]=pars[i]
+                    if i%2==1:
+                        self.peaks[(j-3)/2][2]=width
+                        self.params.append(pars[i])
+                        self.params.append(width)
+                        continue
+                self.params.append(pars[i])
+            
+            for i in xrange(numpars):
+                if i==3:
+                    widthErr=errs[3]
+                    continue
+                self.errors.append(errs[i])
+                if i>3 and i%2==1:
+                    self.errors.append(widthErr)
+        else:
+            Spectrum.processFitResults(self, pars, errs)
+    def meanPeakWidth(self):
+        '''the average peak width in MHz. Error calc is not exact yet!'''
+        if not self.isValid():
+            print 'invalid spectrum'
+            return [0,0]
+        width=np.take(self.params,[5,8,11,14,17,20]).mean()
+        width=self.getFrequency(self.peaks[1][1]+width)
+        err=np.take(self.errors,[5,8,11,14,17,20]).max()
+        err=self.getFrequency(self.peaks[1][1]+err)
+        err+=self.getFrequencyError(self.peaks[1][1]+width)
+        return [width, err]
     def leftZeemanSplitting(self):
         if not self.isValid():
             print 'invalid spectrum'
@@ -335,6 +621,18 @@ class DFSpec(Spectrum):
         r = self.params[9]
         rErr = self.errors[9]
         return [l/r, np.sqrt((lErr/l)**2+(rErr/r)**2)*abs(l/r)]
+    def leftPeakCenter(self):
+        return [self.params[4],self.errors[4]]
+    def dipCenter(self):
+        return [self.params[7],self.errors[7]]
+    def rightPeakCenter(self):
+        return [self.params[10],self.errors[10]]
+    def leftRefCenter(self):
+        return [self.params[13],self.errors[13]]
+    def refLineCenter(self):
+        return [self.params[16],self.errors[16]]
+    def rightRefCenter(self):
+        return [self.params[19],self.errors[19]] 
      
 class DBSpec(Spectrum):
     def __init__(self,data):
@@ -391,6 +689,9 @@ def enhancedDerivative(data,win_len=31):
     profile=[0]    
     #profile is like the discrete derivative of data
     for i in xrange(pts-1):
+        if x[i+1]==x[i]:
+            profile.append(0)
+            continue
         profile.append((y[i+1]-y[i])/(x[i+1]-x[i]))
     #create a spectrum containing the sum of values 
     #within a window around the center point    
@@ -480,9 +781,12 @@ def create_TGraph(data,xerr,yerr):
     n=len(data[0])    
     x=np.asarray(data[0],dtype=np.float64)
     y=np.asarray(data[1],dtype=np.float64)
-    xnoise=np.asarray([xerr]*n,dtype=np.float64)
-    ynoise=np.asarray([yerr]*n,dtype=np.float64)
-    T2gr=TGraphErrors(n,x,y,xnoise,ynoise)
+    if yerr==0:
+        T2gr=TGraph(n,x,y)
+    else:
+        xnoise=np.asarray([xerr]*n,dtype=np.float64)
+        ynoise=np.asarray([yerr]*n,dtype=np.float64)
+        T2gr=TGraphErrors(n,x,y,xnoise,ynoise)
     T2gr.SetLineColor( 2 )
     T2gr.SetLineWidth( 2 )
     T2gr.SetMarkerColor( 4 )
@@ -527,3 +831,12 @@ def guessLevelDrift(data, steps=5):
         levels.append(guessMeanLevel(region))
     drift, level= np.polyfit(centers,levels,1)
     return level,drift
+    
+#create a sample spectrum
+#d=np.loadtxt('time7.txt')
+#s=DFSpec([d[3],d[1]])
+#s.fit()
+#s.noisefit1()
+#s.setAlpha(0.01)
+#s.setStyle('simplevoigt')
+#s.fit()
