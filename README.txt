@@ -1,5 +1,6 @@
 ﻿DDAVLLock Code HowTo
 
+***If any questions or bugs, mailto thomas.stolz@tum.de***
 
 1. Analyzing spectra with “spectrum.py”
 
@@ -176,4 +177,4 @@ def loadLog(...):
 Can be used to load a .log file created with “saveLog”.
 
 
-The three functions are wrapped within a programm, that first provides a graphical interface to select files. If a .log file is selected, it is loaded and it content is plotted. If .txt or similar files containing spectral data are provided, they are analyzed and the results are saved in a log file. Lastly the results are plotted with matplotlib.
+The three functions are wrapped within a programm, that first provides a graphical interface to select files. If a .log file is selected, it is loaded and its content is plotted. If .txt or similar files containing spectral data are provided, they are analyzed and the results are saved in a log file. Lastly the results are plotted with matplotlib.
