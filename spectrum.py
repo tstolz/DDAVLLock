@@ -11,7 +11,7 @@ from scipy.special import erf
 import matplotlib.pyplot as plt
 from pylab import get_current_fig_manager
 import time
-from ROOT import TMath, TGraph, TGraphErrors, TF1, TCanvas, TVirtualFitter, kBlack
+from ROOT import TMath, TGraph, TGraphErrors, TF1, TCanvas, TVirtualFitter
 
 global wRatio
 #ratio of the Doppler width to the convoluted peak width (FWHM)
@@ -218,7 +218,7 @@ class Spectrum:
                 continue
             self.errors.append(errs[i])
                     
-    def fit(self, parameters=None, showgraphs=False, verbose=False, quiet=False):
+    def fit(self, parameters=None, showgraphs=True, verbose=True, quiet=False):
         '''Fits the spectrum with initial values "parameters". If None are given,
         the parameters are guessed first. Showgraphs displays the guessed curve
         before the fit. Verbose sets the "v" flag when calling the ROOT fit. 
@@ -237,6 +237,7 @@ class Spectrum:
         
         # create lists with initial parameters and their names
         ParList, ParNames = self.createParLists(parameters)
+        print ParList
         
         gr=create_TGraph(data, xerr, self.noise_level)
         fit1=TF1("fit1",cmdstring, min(data[0]), max(data[0]))
@@ -261,7 +262,7 @@ class Spectrum:
         if verbose:
             opt="VMEX0S"
         else:
-            opt="QNEX0S"
+            opt="QMEX0S"
         # Tell root to do the fit. This can take some minutes.
         resultPtr = gr.Fit(fit1, opt,"AP", data[0].min(), data[0].max())
         
@@ -292,6 +293,7 @@ class Spectrum:
             canvas.Update()
             canvas.Show()
             raw_input("done, press any key")
+            canvas.IsA().Destructor(canvas)
         
         # Release ROOT objects to avoid memory issues
         gr.IsA().Destructor(gr)
@@ -308,7 +310,7 @@ class DFSpec(Spectrum):
     peak widths are fixed, as these should all be the same in the lock
     spectrum. Also utility functions to obtain properties of the spectrum,
     especially the lock point and its error.'''
-    def __init__(self,data,style='simplelorentz',freq_diff=97, freq_err=0.18):
+    def __init__(self,data,style='slimlorentz',freq_diff=97, freq_err=0.18):
         '''freq_diff is the isotope shift in MHz, freq_err its fractional error'''        
         Spectrum.__init__(self, data)
         self.setStyle(style)
@@ -395,8 +397,13 @@ class DFSpec(Spectrum):
         if not self.isValid():
             print 'invalid spectrum'
             return 0
-        scale=self.freq_diff/(pars[16]-pars[7])
-        return (x-pars[7])*scale
+        if self.style=='slimlorentz':
+            scale=self.freq_diff/pars[4]
+            zero=pars[3]
+        else:
+            scale=self.freq_diff/(pars[16]-pars[7])
+            zero=pars[7]
+        return (x-zero)*scale
     def freq2volts(self,f,pars=None):
         '''convert detuning to voltage. inverts getFrequency'''
         if type(pars)==type(None):
@@ -525,7 +532,6 @@ class DFSpec(Spectrum):
                 cmdstring+=",[7]*0.5)" 
         else:
             cmdstring=Spectrum.createCmdString(self)
-        print cmdstring
         return cmdstring
         
     def createParLists(self,parameters):
@@ -907,7 +913,7 @@ def guessLevelDrift(data, steps=5):
     return level,drift
     
 #create a sample spectrum
-d=np.loadtxt('test1.txt')
+d=np.loadtxt('timenew17.txt')
 l=np.linspace(0,1,1000)
-s=DFSpec([l,d[1]],'slimlorentz')
+s=DFSpec([d[3],d[1]],'slimlorentz')
 s.fit(verbose=True,showgraphs=True)

@@ -9,8 +9,9 @@ import Tkinter as tk
 import tkFileDialog as tkf
 import re
 import os.path
-from uncertainties import ufloat
-from uncertainties.umath import sqrt
+import sys
+#from uncertainties import ufloat
+#from uncertainties.umath import sqrt
 
 #an example function, if the spectrum class doesn't contain a 
 #needed method
@@ -22,13 +23,13 @@ def Slope(spec):
 #supported functions have to take one DFSpec argument and return either a value or
 #a list of the form [value, error]
 global prop
-prop=[DFSpec.lockPointX, DFSpec.lockPointY, Slope, DFSpec.lockPrecision, DFSpec.meanPeakWidth, DFSpec.getChiSquareRed]
+prop=[]#DFSpec.lockPointX, DFSpec.lockPointY, Slope, DFSpec.lockPrecision, DFSpec.meanPeakWidth, DFSpec.getChiSquareRed]
 
 global fitstyle
-fitstyle='simplevoigt'
+fitstyle='slimlorentz'
 
 global noise
-noise=0
+noise=0.025616899310231329
 
 #if multiple measurement points shall be averaged for one property point
 #set this to something greater than 1
@@ -70,9 +71,9 @@ def analyzation(dateien):
     #index for deciding when to begin a new plot
     j=0
     
-    #variable to store noise level
-    noise=0
-        
+    noise=0.025616899310231329
+    fitstyle='slimlorentz'
+    
     for datei in dateien:
         print datei
         if datei.endswith('.npy'):
@@ -86,13 +87,12 @@ def analyzation(dateien):
         else:
             print 'unknown format '+ datei
             continue
-        s=DFSpec([data[3],data[1]])
+        s=DFSpec([data[3],data[1]],fitstyle)
         s.setAlpha(0.01)
-        if j==0 and not noise:
+        if j==0 and noise==0:
             s.fit()
             s.noisefit1()
             noise=s.noise_level
-        s.setStyle(fitstyle)
         s.noise_level=noise
         s.fit()
     
@@ -120,11 +120,11 @@ def analyzation(dateien):
                 propErrs[i].append(0)
                 
         #create a new figure for the spectra if the current is full
-        if j%20 == 0:
-            plt.figure(figsize=(20,20))
-        plt.subplot(5,4,j%20+1)
-        s.plot()
-        plt.draw()
+#        if j%20 == 0:
+#            plt.figure(figsize=(20,20))
+#        plt.subplot(5,4,j%20+1)
+#        s.plot()
+#        plt.draw()
         j+=1
 
     #get the folder of the files
@@ -183,15 +183,19 @@ def loadLog(filename, listsep='\n', valsep=' '):
 
 root=tk.Tk()
 root.title("data analysis")
- 
-dateien=unicode(tkf.askopenfilenames())
- 
-dateien=re.findall('{.*?}',dateien)
-root.destroy()
- 
-for i in xrange(len(dateien)):
-    dateien[i]=dateien[i].replace('{','')
-    dateien[i]=dateien[i].replace('}','')
+
+if sys.platform=='win32':
+    dateien=unicode(tkf.askopenfilenames())
+    dateien=re.findall('{.*?}',dateien)
+    root.destroy()
+     
+    for i in xrange(len(dateien)):
+        dateien[i]=dateien[i].replace('{','')
+        dateien[i]=dateien[i].replace('}','')
+else:
+    dateien=list(tkf.askopenfilenames())
+
+print dateien
 
 if len(dateien) == 1 and dateien[0].endswith('.log'):
     files, propNames, params, paramErrs, propVals, propErrs = loadLog(dateien[0])
@@ -201,26 +205,26 @@ else:
 
 #this part is for the case multiple measurements have been performed
 #with the same parameters -> set numpoints to this value
-if numPoints>1:
-    newpropVals=[]
-    newpropErrs=[]
-    #construct an array with values and errors using the uncertainties package
-    valNerr=[[ufloat(propVals[i][j],propErrs[i][j]) for j in xrange(len(propVals[i]))] for i in xrange(len(propVals))]
-    valNerr=np.array(valNerr)
-    for line in valNerr:
-        valtemp=[]
-        errtemp=[]
-        for i in xrange(len(line)/numPoints):
-            #temporary, this should be checked for correct propagation of errors!        
-            l=line[numPoints*i:numPoints*(i+1)]            
-            mean=l.mean()
-            std=sqrt(l.var())
-            valtemp.append(mean.n)
-            errtemp.append(std.n)
-        newpropVals.append(valtemp)
-        newpropErrs.append(errtemp)
-    propVals=newpropVals
-    propErrs=newpropErrs
+#if numPoints>1:
+#    newpropVals=[]
+#    newpropErrs=[]
+#    #construct an array with values and errors using the uncertainties package
+#    #valNerr=[[ufloat(propVals[i][j],propErrs[i][j]) for j in xrange(len(propVals[i]))] for i in xrange(len(propVals))]
+#    valNerr=np.array(valNerr)
+#    for line in valNerr:
+#        valtemp=[]
+#        errtemp=[]
+#        for i in xrange(len(line)/numPoints):
+#            #temporary, this should be checked for correct propagation of errors!        
+#            l=line[numPoints*i:numPoints*(i+1)]            
+#            mean=l.mean()
+#            std=sqrt(l.var())
+#            valtemp.append(mean.n)
+#            errtemp.append(std.n)
+#        newpropVals.append(valtemp)
+#        newpropErrs.append(errtemp)
+#    propVals=newpropVals
+#    propErrs=newpropErrs
 
 
 #create a figure for the parameters
