@@ -5,12 +5,13 @@ Created on Tue Oct 15 14:57:32 2013
 @author: Thomas Stolz
 """
 
+from spectrumstyles import *
 import numpy as np
 from scipy.special import erf
 import matplotlib.pyplot as plt
 from pylab import get_current_fig_manager
 import time
-from ROOT import TMath, TGraph, TGraphErrors, TF1
+from ROOT import TMath, TGraph, TGraphErrors, TF1, TCanvas, TVirtualFitter, kBlack
 
 global wRatio
 #ratio of the Doppler width to the convoluted peak width (FWHM)
@@ -244,22 +245,25 @@ class Spectrum:
         for n in range(len(ParList)):
             fit1.SetParameter(n,ParList[n])
         
+        fit1.SetLineWidth(2)
+        fit1.SetLineColor(1)
         # we could set limits for the parameters here if we want        
         
         if showgraphs:
-            gr.Draw()
+            canvas=TCanvas("Fit","Fit")
+            gr.Draw("ap")
+            fit1.Draw("same")
             #print initial curve
             raw_input("pre fit, press any key")
             print 'fitting...'
             
         tm=time.time()
         if verbose:
-            opt="VNEX0"
+            opt="VMEX0S"
         else:
-            opt="QNEX0"
+            opt="QNEX0S"
         # Tell root to do the fit. This can take some minutes.
-        resultPtr = gr.Fit(fit1, opt,"", data[0].min(), data[0].max())
-        result=resultPtr.Get()
+        resultPtr = gr.Fit(fit1, opt,"AP", data[0].min(), data[0].max())
         
         if not quiet:
             print "Fitting time: %f s" % (time.time()-tm)
@@ -272,15 +276,27 @@ class Spectrum:
         self.ChiSquareRed=fit1.GetChisquare()/float(numpoints)
         if not quiet:
             print "Fit converged with reduced chi-squared: %f" % (self.ChiSquareRed)
-            print "Status: %d" % (result.Status())
+            print "Status: %d" % (resultPtr.Status())
+        print resultPtr.GetCorrelationMatrix().GetMatrixArray()
+
+#       ROOT status codes for Minuit2 (issues if >0):
+#       status = 1    : Covariance was made pos defined
+#       status = 2    : Hesse is invalid
+#       status = 3    : Edm is above max
+#       status = 4    : Reached call limit
+#       status = 5    : Any other failure
+       
         self.fitted=True        
         if showgraphs:        
-            fit1.Draw()
+            fit1.Draw("same")
+            canvas.Update()
+            canvas.Show()
+            raw_input("done, press any key")
         
         # Release ROOT objects to avoid memory issues
         gr.IsA().Destructor(gr)
         fit1.IsA().Destructor(fit1)
-        result.IsA().Destructor(result)
+        #resultPtr.IsA().Destructor(resultPtr)
         #this should return a fitresult
         return None
 
@@ -504,7 +520,7 @@ class DFSpec(Spectrum):
             cmdstring="pol2"
             center=["[3]-[5]","[3]","[3]+[5]","[3]+[4]-[6]","[3]+[4]","[3]+[4]+[6]"]
             for i in xrange(len(self.peaks)):
-                cmdstring+="+[%d]*3.14159*[7]*0.5*TMath::CauchyDist(x," % (8+i)
+                cmdstring+="+[%d]*TMath::Pi()*[7]*0.5*TMath::CauchyDist(x," % (8+i)
                 cmdstring+=center[i]
                 cmdstring+=",[7]*0.5)" 
         else:
@@ -845,11 +861,11 @@ def create_TGraph(data,xerr,yerr):
         xnoise=np.asarray([xerr]*n,dtype=np.float64)
         ynoise=np.asarray([yerr]*n,dtype=np.float64)
         T2gr=TGraphErrors(n,x,y,xnoise,ynoise)
-    T2gr.SetLineColor( 2 )
-    T2gr.SetLineWidth( 2 )
+    T2gr.SetLineColor( 1 )
+    T2gr.SetLineWidth( 1 )
     T2gr.SetMarkerColor( 4 )
     T2gr.SetMarkerStyle( 21 )
-    T2gr.SetMarkerSize(0.1)
+    T2gr.SetMarkerSize(0.3)
     T2gr.SetTitle( 'Fit' )
     T2gr.GetXaxis().SetTitle( 'Scan Voltage' )
     T2gr.GetYaxis().SetTitle( 'Signal Voltage' )
@@ -891,10 +907,7 @@ def guessLevelDrift(data, steps=5):
     return level,drift
     
 #create a sample spectrum
-#d=np.loadtxt('time7.txt')
-#s=DFSpec([d[3],d[1]])
-#s.fit()
-#s.noisefit1()
-#s.setAlpha(0.01)
-#s.setStyle('simplevoigt')
-#s.fit()
+d=np.loadtxt('test1.txt')
+l=np.linspace(0,1,1000)
+s=DFSpec([l,d[1]],'slimlorentz')
+s.fit(verbose=True,showgraphs=True)
