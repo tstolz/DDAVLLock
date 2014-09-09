@@ -8,6 +8,7 @@ Created on Tue Oct 15 14:57:32 2013
 import numpy as np
 from scipy.special import erf
 import matplotlib.pyplot as plt
+from pylab import get_current_fig_manager
 import time
 from ROOT import TMath, TGraph, TGraphErrors, TF1
 
@@ -59,7 +60,7 @@ class Spectrum:
             elif self.style=="lorentz":
                 #ROOT defined the CauchyDist with HWHM and Voigt with FWHM
                 #so we get a factor 0.5 in front of peak[2] (FWHM)
-                result += peak[0]*TMath.CauchyDist(x,peak[1],peak[2]*0.5)
+                result += peak[0]*TMath.Pi()*0.5*peak[2]*TMath.CauchyDist(x,peak[1],peak[2]*0.5)
             elif self.style=="voigt":
                 #vratio is now the angle between the beams (after the theory...) 
                 #92.4065 is the ratio between the gaussian and the lorentzian width                
@@ -102,7 +103,7 @@ class Spectrum:
                 height=peak[0]
             elif self.style=='lorentz' or self.vratio==0:
                 width=peak[2]
-                height=peak[0]*np.pi*width*0.5
+                height=peak[0]
             elif self.style=='voigt':
                 #the following are approximations taken from 
                 #Zing-Qiao et al., adapted to our case
@@ -156,7 +157,7 @@ class Spectrum:
         elif self.style=='lorentz':
             cmdstring="pol2"
             for i in xrange(len(self.peaks)):
-                cmdstring+="+[%d]*TMath::CauchyDist(x,[%d],[%d]*0.5)" % (3+i*3,4+i*3,5+i*3)
+                cmdstring+="+[%d]*3.14*[%d]*0.5*TMath::CauchyDist(x,[%d],[%d]*0.5)" % (3+i*3,5+i*3,4+i*3,5+i*3)
         elif self.style=='voigt':
             cmdstring="pol2"
             for i in xrange(len(self.peaks)):
@@ -257,7 +258,8 @@ class Spectrum:
         else:
             opt="QNEX0"
         # Tell root to do the fit. This can take some minutes.
-        gr.Fit(fit1, opt,"", data[0].min(), data[0].max())
+        resultPtr = gr.Fit(fit1, opt,"", data[0].min(), data[0].max())
+        result=resultPtr.Get()
         
         if not quiet:
             print "Fitting time: %f s" % (time.time()-tm)
@@ -270,10 +272,17 @@ class Spectrum:
         self.ChiSquareRed=fit1.GetChisquare()/float(numpoints)
         if not quiet:
             print "Fit converged with reduced chi-squared: %f" % (self.ChiSquareRed)
+            print "Status: %d" % (result.Status())
         self.fitted=True        
         if showgraphs:        
             fit1.Draw()
-        return fit1
+        
+        # Release ROOT objects to avoid memory issues
+        gr.IsA().Destructor(gr)
+        fit1.IsA().Destructor(fit1)
+        result.IsA().Destructor(result)
+        #this should return a fitresult
+        return None
 
 
 #------------------------Subclasses-------------------------------
@@ -295,10 +304,12 @@ class DFSpec(Spectrum):
         simplevoigt: voigt profiles with equal peak widths
         simplelorentz: lorentz profiles with equal peak widths
         fixedvoigt: voigt profiles with a fixed gauss-lorentz-ratio
+        slimlorentz: lorentzians with minimal amount of parameters 
+        --> (center199, Delta199-204, zeeman199, zeeman204, width, height0, height1, height2, height3, height4, height5)
         
         General styles from superclass are also possible.'''
         
-        if not style in ["simplevoigt","simplelorentz","fixedvoigt"]:
+        if not style in ["simplevoigt","simplelorentz","fixedvoigt","slimlorentz"]:
             Spectrum.setStyle(self,style)
         else:
             self.style=style
@@ -307,42 +318,57 @@ class DFSpec(Spectrum):
         '''Set the gauss-lorentz-ratio assuming an angle alpha between 
         the beams.'''
         self.vratio=alpha*wRatio
-    def plot(self,underground=True):
+    def plot(self,background=True):
         '''Valid spectra are plotted with theory curve in red,
-        data points in black and signal underground in green. The x-axis
+        data points in black and signal background in green. The x-axis
         is in MHz.'''
         if not self.isValid():
             Spectrum.plot(self)
             return
         Fit=np.asarray([self.theory(x,self.params) for x in self.data[0]])
         xaxis=self.getFrequency(self.data[0])
-        if underground:
+        if background:
             plt.plot(xaxis,self.data[1],'k,',xaxis,Fit,'r-',xaxis,self.data[1]-Fit,'g-')
         plt.plot(xaxis,self.data[1],'k,',xaxis,Fit,'r-')
         plt.xlabel('frequency [MHz]')
         plt.ylabel('diode signal [V]')
         plt.grid(True)
+        get_current_fig_manager().window.raise_()
     def theory(self, x, params):
         '''return the theory value at x for a spectrum with parameters "params"
 
         params must have the form "level, drift, curvature, height1, center1, width1, ... heightN, centerN, widthN'''
-        if not self.style in ["simplevoigt","simplelorentz","fixedvoigt"]:
+        if not self.style in ["simplevoigt","simplelorentz","fixedvoigt","slimlorentz"]:
             return Spectrum.theory(self,x,params)
-
+            
         level = params[0]
         drift = params[1]
         curv = params[2]
-        peaks = [[params[i],params[i+1],params[i+2]] for i in range(3,len(params),3)]
+        
+        if self.style=="slimlorentz":
+            peaks=np.zeros((6,3))
+            peaks[1][1]=params[3]
+            peaks[4][1]=params[3]+params[4]
+            peaks[0][1]=params[3]-params[5]
+            peaks[2][1]=params[3]+params[5]
+            peaks[3][1]=params[3]+params[4]-params[6]
+            peaks[5][1]=params[3]+params[4]+params[6]
+            for j in xrange(6):
+                peaks[j][2]=params[7]
+                peaks[j][0]=params[j+8]
+        else:
+            peaks = [[params[i],params[i+1],params[i+2]] for i in range(3,len(params),3)]
+        
         result = level + x*drift + x**2 * curv
         for peak in peaks:
             if self.style=="simplevoigt":
                 #this approximation of a voigt profile with fixed height
                 #is good for vratio < 1.5 with less than 2 % error                   
                 result += peak[0]*peak[2]/(0.637-0.255*self.vratio-0.998*self.vratio**2+1.78*self.vratio**3-1.15*self.vratio**4+0.265*self.vratio**5)*TMath.Voigt(x-peak[1],self.vratio*peak[2],peak[2])
-            elif self.style=="simplelorentz":
+            elif self.style=="simplelorentz" or self.style=='slimlorentz':
                 #ROOT defined the CauchyDist with HWHM and Voigt with FWHM
                 #so we get a factor 0.5 in front of peak[2] (FWHM)
-                result += peak[0]*TMath.CauchyDist(x,peak[1],peak[2]*0.5)        
+                result += peak[0]*TMath.Pi()*0.5*peak[2]*TMath.CauchyDist(x,peak[1],peak[2]*0.5)        
         return result
     def getFrequency(self,x,pars=None):
         '''return the associated frequency relative to the Hg-199 
@@ -433,28 +459,32 @@ class DFSpec(Spectrum):
             heights=np.abs(np.asarray(self.peaks).T[0])
             self.peaks=np.delete(self.peaks,heights.argmin(),0)
         
-        if not self.style in ["simplevoigt","simplelorentz","fixedvoigt"]:
+        if not self.style in ["simplevoigt","simplelorentz","fixedvoigt","slimlorentz"]:
             Spectrum.peaksToParams(self)
             return
         
-        #the following approximation for the width of voigt profiles 
-        #is taken from Zing-Qiao et al., adapted to our case
         FWHM=[]
         for peak in self.peaks:
             FWHM.append(peak[2])
         FWHM=np.mean(FWHM)
         
         if self.style=='simplevoigt' or self.style=='fixedvoigt':
+            #the following approximation for the width of voigt profiles 
+            #is taken from Zing-Qiao et al., adapted to our case
             width=2*FWHM/(1.0692 + np.sqrt(0.86639 + 4*8 * np.log(2) * self.vratio**2))
-        elif self.style=='simplelorentz':
+        elif self.style=='simplelorentz' or self.style=='slimlorentz':
             width=FWHM
+            
+        if self.style=='slimlorentz':
+            if len(self.peaks)!=6:
+                print "Peak detection error: slimlorentz needs 6 peaks!"
+            # center199, Delta199-204, zeeman199, zeeman204, width
+            self.params+=[self.peaks[1][1],self.peaks[4][1]-self.peaks[1][1],(self.peaks[2][1]-self.peaks[0][1])/2.,(self.peaks[5][1]-self.peaks[3][1])/2.,width]
         
         for peak in self.peaks:
-            if self.style=='simplevoigt' or self.style=='fixedvoigt':
-                height=peak[0]
-            elif self.style=='simplelorentz':
-                height=peak[0]*np.pi*width*0.5
-            self.params.append(height)
+            self.params.append(peak[0])
+            if self.style=='slimlorentz':
+                continue
             self.params.append(peak[1])
             self.params.append(width)
         
@@ -463,15 +493,23 @@ class DFSpec(Spectrum):
             cmdstring="pol2"
             for i in xrange(len(self.peaks)):
                 #this approximation of a voigt profile with fixed height
-                #is good for vratio < 1.5 with less than 2 % error            
+                #is good for vratio < 1.5 with less than 2 % error   
+                #seems to be invalid!!!
                 cmdstring+="+[%d]*[4]/(0.637-0.255*[3]-0.998*[3]*[3]+1.78*[3]*[3]*[3]-1.15*[3]*[3]*[3]*[3]+0.265*[3]*[3]*[3]*[3]*[3])*TMath::Voigt(x-[%d],[3]*[4],[4])" % (5+i*2,6+i*2)
         elif self.style=='simplelorentz':
             cmdstring="pol2"
             for i in xrange(len(self.peaks)):
-                cmdstring+="+[%d]*TMath::CauchyDist(x,[%d],[3]*0.5)" % (4+i*2,5+i*2)
+                cmdstring+="+[%d]*3.14159*[3]*0.5*TMath::CauchyDist(x,[%d],[3]*0.5)" % (4+i*2,5+i*2)
+        elif self.style=='slimlorentz':
+            cmdstring="pol2"
+            center=["[3]-[5]","[3]","[3]+[5]","[3]+[4]-[6]","[3]+[4]","[3]+[4]+[6]"]
+            for i in xrange(len(self.peaks)):
+                cmdstring+="+[%d]*3.14159*[7]*0.5*TMath::CauchyDist(x," % (8+i)
+                cmdstring+=center[i]
+                cmdstring+=",[7]*0.5)" 
         else:
             cmdstring=Spectrum.createCmdString(self)
-        
+        print cmdstring
         return cmdstring
         
     def createParLists(self,parameters):
@@ -499,6 +537,11 @@ class DFSpec(Spectrum):
                 ParNames.append("height%d" % i)  
                 ParNames.append("center%d" % i)   
                 
+        elif self.style=='slimlorentz':
+            ParList=parameters
+            ParNames=["level","drift","curvature", "center199", "Delta199-204", "zeeman199", "zeeman204", "width"]
+            for i in xrange(6):
+                ParNames.append("height%d" % i)
         else:
             ParList, ParNames=Spectrum.createParLists(self,parameters)
         
@@ -539,8 +582,6 @@ class DFSpec(Spectrum):
                     
         elif self.style=='simplelorentz':
             numpars=3+1+2*len(self.peaks)
-            self.params=[]
-            self.errors=[]
             for i in xrange(numpars):
                 if i==3:
                     width=pars[i]
@@ -562,6 +603,23 @@ class DFSpec(Spectrum):
                 self.errors.append(errs[i])
                 if i>3 and i%2==1:
                     self.errors.append(widthErr)
+                    
+        elif self.style=='slimlorentz':
+            self.params=[]
+            self.errors=[]
+            self.peaks[1][1]=pars[3]
+            self.peaks[4][1]=pars[3]+pars[4]
+            self.peaks[0][1]=pars[3]-pars[5]
+            self.peaks[2][1]=pars[3]+pars[5]
+            self.peaks[3][1]=pars[3]+pars[4]-pars[6]
+            self.peaks[5][1]=pars[3]+pars[4]+pars[6]
+            for j in xrange(6):
+                self.peaks[j][2]=pars[7]
+                self.peaks[j][0]=pars[j+8]
+            for i in xrange(14):
+                self.params.append(pars[i])
+                self.errors.append(errs[i])
+                    
         else:
             Spectrum.processFitResults(self, pars, errs)
     def meanPeakWidth(self):
