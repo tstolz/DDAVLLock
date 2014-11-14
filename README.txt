@@ -8,43 +8,35 @@
 >> from spectrum import *
 
 
-This file contains the class “Spectrum” with subclasses “DFSpec” and “DBSpec”. These objects can contain transmission spectra, e.g. as recorded with digilock, and provide methods to analize them. 
+This file contains the class “SpecFitter", which analyzes transmission spectra, e.g. as recorded with digilock, 
+and provides different options to fit them.
 
 
->> s = Spectrum(data)
+>> s = SpecFitter(data, numpeaks=6, FModel=Hg199_204, BModel=Linear)
 
 
-data must be a two dimensional array with x and y data. 
+'data' must be a two dimensional array with x and y data, 'numpeaks' gives the number of peaks to detect, 
+FModel & BModel the fitmodels for the foreground and background. Fitmodels are defined in the file 'fitmodels.py' 
+and have to inherit from the 'FitModel' superclass. 
 
+When a SpecFitter instance is created, a number of internal functions are executed that detect the peaks in the spectrum, 
+estimate the noiselevel and instantiate the fitmodels. 
 
->> s.setStyle(‘voigt’)
-
-
-Choose a style for the peaks in the spectrum. Standard types are “lorentz”, “gauss” and “voigt”. If “voigt” is chosen, there is a parameter s.vratio describing the ratio of gaussian to lorentzian width of the voigt profile. DFSpec also defines advanced types “simplelorentz”, “simplevoigt” (all peaks have the same width) and “fixedvoigt” (the gauss-lorentz-ratio is fixed). 
-
-
->> s.guessParams()
-
-
-This command detects the peaks in the spectrum and determines their height, width and position. These values are converted to parameters of the theory function according to the style.
-
+If the peak detection was not successful (e.g if less than 
+'numpeaks' were found), the variable 'self.alive' is set to 'False'. This should be checked by calling 'self.isAlive'
+before trying to perform a fit.
+If the peak detection was successful, the height, position, and width are stored in 'self.peaks'. 
 
 >> s.draw()
 
 
-Plots the data together with the theory function and the noise underground. 
+Plots the data together with the theory function and the background.
 
 
 >> s.fit()
 
 
-The spectrum is fitted with ROOT. Calls guessParams() before to obtain estimates for the fit.
-
-
->> s.noisefit1()
-
-
-Subtract the theory curve from the datapoints and determines the RMS noise. Assigns the value to s.noise_level.
+The spectrum is fitted with ROOT.
 
 
 The fitted parameters & errors are contained within s.params and s.errors. Note that the errors have no real meaning unless the variable s.noise_level has been set to a reasonable value.
@@ -55,29 +47,6 @@ level, drift, curvature, height1, center1, width1, … , heightN, centerN, widht
 
 
 level, drift and curvature define the signal underground (a quadratic fit). 
-
-
-Specific features of DFSpec:
-
-
->> s.setAlpha(0.01)
-
-
-Set an estimate for the angle between the beams (in rad). For the conversion to “s.vratio”, the global variable “wRatio” is used. 
-
-
->> s.lockPointY(freq=-8.9)
->> [0.123456789, 0.02]
-
-
-Determine the lockpoint on the y-axis to lock to a frequency freq (in MHz). Returns an array with the lockpoint and its error estimate.
-
-
->> s.isValid()
->> True
-
-
-Check if there are 6 peaks, the reduced chi-squared is ok and so on.
 
 
 >> s.draw()
