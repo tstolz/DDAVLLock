@@ -1,6 +1,6 @@
 ﻿DDAVLLock Code HowTo
 
-***If any questions or bugs, mailto thomas.stolz@tum.de***
+***questions or bugs? -> mailto thomas.stolz@tum.de***
 
 1. Analyzing spectra with “spectrum.py”
 
@@ -15,44 +15,51 @@ and provides different options to fit them.
 >> s = SpecFitter(data, numpeaks=6, FModel=Hg199_204, BModel=Linear)
 
 
-'data' must be a two dimensional array with x and y data, 'numpeaks' gives the number of peaks to detect, 
-FModel & BModel the fitmodels for the foreground and background. Fitmodels are defined in the file 'fitmodels.py' 
-and have to inherit from the 'FitModel' superclass. 
+'data' must be a two dimensional array with x and y data, 'numpeaks' gives the number of peaks to detect (if this is 
+None the peak detection algorithm uses default preferences and all detected peaks are used), FModel & BModel are 
+the fitmodels for the foreground and background. Fitmodels are defined in the file 'fitmodels.py' and have to inherit 
+from the 'FitModel' superclass. 
 
-When a SpecFitter instance is created, a number of internal functions are executed that detect the peaks in the spectrum, 
+When a SpecFitter instance is created, a number of internal functions are executed that detect peaks in the spectrum, 
 estimate the noiselevel and instantiate the fitmodels. 
 
-If the peak detection was not successful (e.g if less than 
-'numpeaks' were found), the variable 'self.alive' is set to 'False'. This should be checked by calling 'self.isAlive'
-before trying to perform a fit.
-If the peak detection was successful, the height, position, and width are stored in 'self.peaks'. 
-
->> s.draw()
-
-
-Plots the data together with the theory function and the background.
+If the peak detection was not successful (e.g if less than 'numpeaks' were found), the variable 'self.alive' is set 
+to 'False'. This should be checked by calling 'self.isAlive' before trying to perform a fit.
+If the peak detection was successful, the height, position, and width are stored in 'self.peaks'. It is noted that,
+if more than numpeaks were found, the smallest peaks are deleted to match the specification.
 
 
 >> s.fit()
 
 
-The spectrum is fitted with ROOT.
-
-
-The fitted parameters & errors are contained within s.params and s.errors. Note that the errors have no real meaning unless the variable s.noise_level has been set to a reasonable value.
-
-
-Order of s.params:
-level, drift, curvature, height1, center1, width1, … , heightN, centerN, widhtN
-
-
-level, drift and curvature define the signal underground (a quadratic fit). 
+The spectrum is fitted with ROOT, the fit result is processed by the FitModel, and the residuals are calculated. The
+fit parameters and their errors are stored in the FitModel and can be accessed via s.FModel.params and s.FModel.errors.
+If the FitModel is implemented correctly, s.peaks should also be updated to hold the values obtained from the fit. 
+The available analysis functionality depends on the FitModel. A list of some basic properties provided by the superclass
+"FitModel" is given as follows:
+Attributes:
+        self.params
+        self.errors
+        self.parnames
+        self.ChiSquareRed
+        self.MaxCorrelation
+        self.CovMatrixPosDef
+        self.Status
+        self.pValue
+Methods:
+        getConfidenceInterval(self,x, cl = 0.68)
+        getString(self)
+        slope(self, x)
+        evaluate(self, x)
+        getString(self)
 
 
 >> s.draw()
 
 
-The x-axis is automatically translated into MHz.
+Plots the data together with the theory function, background, residuals, and a normal probability plot of the residuals.
+If the residuals are normally distributed the latter should be a straight line.
+
 
 
 2. Controlling the DDAVLL system with “controller.py”:
