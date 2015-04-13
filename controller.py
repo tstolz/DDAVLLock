@@ -8,7 +8,8 @@ Created on Mon Dec 09 16:24:53 2013
 from digilock import digilock
 from WLM import WavelengthMeter
 from findWL import findWavelength
-from spectrum import Spectrum, DFSpec, DBSpec
+from spectrum import SpecFitter
+from fitmodels import *
 from SignalBox import SignalBox
 import numpy as np
 import matplotlib.pyplot as plt
@@ -60,15 +61,15 @@ class DDAVLL_Controller:
         self.digilock.setPIDParameters(Gain,P,I,D,PID)
         self.digilock.setPIDOutput('SC110 out',PID)
         sig=self.digilock.getscopedata()
-        spec=DFSpec([sig[3],sig[1]])
+        spec=SpecFitter([sig[3],sig[1]], numpeaks=6, FModel=Hg199_204, BModel=Linear)
         print 'fitting...'
         spec.fit()
         print 'done'
         #obtain the index of the X-lockPoint in the data-array
         #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
         #this should be done differently in the future!!!
-        #because the set point cannot be controlled!
-        lockindex=np.argmin(np.abs(spec.data[0]-spec.lockPointX()[0]))
+        #because the y set point cannot be controlled!
+        lockindex=np.argmin(np.abs(sig[3]-spec.FModel.getXLockPoint(offset)))
         print 'lockindex: '+str(lockindex)
         self.digilock.setLockPoint(lockindex)
         self.digilock.setAutolock(True)
@@ -76,10 +77,8 @@ class DDAVLL_Controller:
     def optimizeLockSignal(self):
         self.digilock.setscanrange(0.5)
         signal=self.digilock.getscopedata()
-        spec=DFSpec([signal[3],signal[1]])
-        #be prepared for narrow and thin peaks
-        spec.guessParams(numPeaks=6)
-        if not spec.isValid():
+        spec=SpecFitter([signal[3],signal[1]], numpeaks=6, FModel=Hg199_204, BModel=Linear)
+        if not spec.isAlive():
             return 'Error: no fine spectrum obtained'
         #zoom in further
         left=spec.peaks[0][1]
@@ -197,20 +196,18 @@ class DDAVLL_Controller:
         #signal[3] contains the scanning voltage
         #cut away first 50 points because of nasty edge effects
         signal=self.digilock.getscopedata()
-        spec=DBSpec([signal[3][50:],signal[1][50:]])
-        spec.guessParams()
-        if not spec.isValid():
+        spec=SpecFitter([signal[3][50:],signal[1][50:]], numpeaks=5, FModel=Gaussian, BModel=Linear)
+        if not spec.isAlive():
             return 'Error: invalid broad signal'
         #zoom in to 5V amplitude
         self.digilock.setscanrange(5)
-        self.digilock.setoffset(spec.getHg199Peak())
+        self.digilock.setoffset(spec.peaks[0][1])
         self.digilock.setscanfrequency(2.5)
         self.digilock.setscopetimescale('200 ms')
         time.sleep(secs)
         signal=self.digilock.getscopedata()
         #clip the signal because of nasty edge effect
-        spec=Spectrum([signal[3][50:],signal[1][50:]])
-        spec.guessParams(numPeaks=1)
+        spec=SpecFitter([signal[3][50:],signal[1][50:]], numpeaks=1, FModel=Gaussian, BModel=Linear)
         #if there is more than one peak something is wrong
         if not len(spec.peaks)==1:
             return 'Error: invalid signal at 5 V amplitude'
@@ -219,8 +216,7 @@ class DDAVLL_Controller:
         self.digilock.setscanrange(3)
         #check signal again
         signal=self.digilock.getscopedata()
-        spec=Spectrum([signal[3][50:],signal[1][50:]])
-        spec.guessParams(numPeaks=1)
+        spec=SpecFitter([signal[3][50:],signal[1][50:]], numpeaks=1, FModel=Gaussian, BModel=Linear)
         #if there is more than one peak something is wrong
         if not len(spec.peaks)==1:
             return 'Error: invalid signal at 3 V amplitude'
@@ -238,10 +234,9 @@ class DDAVLL_Controller:
         time.sleep(secs)
         #check if we have a signal
         signal=self.digilock.getscopedata()
-        spec=DFSpec([signal[3],signal[1]])
+        spec=SpecFitter([signal[3],signal[1]], numpeaks=6, FModel=Hg199_204, BModel=Linear)
         #be prepared for narrow and thin peaks
-        spec.guessParams(numPeaks=6)
-        if not spec.isValid():
+        if not spec.isAlive():
             return 'Error: no fine spectrum obtained'
         #zoom in further
         left=spec.peaks[0][1]

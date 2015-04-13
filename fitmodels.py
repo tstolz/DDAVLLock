@@ -238,85 +238,62 @@ class Hg199_204(ForegroundModel):
         '''Get the ratio of an x-value normalized to the given D199_204.'''
         return float(x)/self.params[1]*D199_204
 
-class Hg199_204_Nonlinear(ForegroundModel):
-    '''lorentzians with minimal amount of parameters:
-    --> (center199, Delta199-204, zeeman199, zeeman204, width, c1, c2, height0, 
-        height1, height2, height3, height4, height5)
-    checks, if there are 6 peaks
-    includes a quadratic x-axis nonlinearity'''
-
-    def setParNames(self):
-        ParNames=["center199", "Delta199-204", "zeeman199", "zeeman204", "width","c1","c2"]
-        for i in xrange(6):
-                ParNames.append("height%d" % i)
-        self.parnames=ParNames
-        for i in xrange(13):
-            self.TF1.SetParName(i, ParNames[i])
+class Gaussian(ForegroundModel):
     def makeString(self):
         string=""
-        center=["[0]-[2]","[0]","[0]+[2]","[0]+[1]-[3]","[0]+[1]","[0]+[1]+[3]"]
-        for j in xrange(6):
-            string+="+[%d]*TMath::Pi()*[4]*0.5*TMath::CauchyDist(x*(1+[5]*x+[6]*x*x)," % (7+j)
-            string+=center[j]
-            string+=",[4]*0.5)" 
+        for i in xrange(len(self.Fitter.peaks)):
+            string+="+gaus(%d)" % (i*3)
         return string[1:]
-    def paramsToPeaks(self, pars, errs):
-        peaks=np.zeros((6,3))
-        errors=np.zeros((6,3))
-        peaks[1][1]=pars[0]
-        errors[1][1]=errs[0]
-        peaks[4][1]=pars[0]+pars[1]
-        errors[4][1]=np.sqrt(errs[0]**2+errs[1]**2)      
-        peaks[0][1]=pars[0]-pars[2]
-        errors[0][1]=np.sqrt(errs[0]**2+errs[2]**2)   
-        peaks[2][1]=pars[0]+pars[2]
-        errors[2][1]=np.sqrt(errs[0]**2+errs[2]**2)   
-        peaks[3][1]=pars[0]+pars[1]-pars[3]
-        errors[3][1]=np.sqrt(errs[0]**2+errs[1]**2+errs[3]**2)
-        peaks[5][1]=pars[0]+pars[1]+pars[3]
-        errors[5][1]=np.sqrt(errs[0]**2+errs[1]**2+errs[3]**2)
-        for j in xrange(6):
-            peaks[j][2]=pars[4]
-            errors[j][2]=errs[4]
-            peaks[j][0]=pars[j+5]
-            errors[j][0]=errs[j+5]
-        self.Fitter.peaks=peaks
-        self.Fitter.errors=errors
     def setInitialValues(self):
-        peaks=np.asarray(self.Fitter.peaks)
-        #if there are less than 6 peaks, this is the wrong model
-        if len(peaks)<6:
-            return 'invalid data'
-        #if there are more than 6 peaks, delete the smallest
-        while len(peaks)>6:
-            #obtain a list of the peak amplitudes by transposing peaks
-            heights=np.abs(np.asarray(peaks).T[0])
-            peaks=np.delete(peaks,heights.argmin(),0)
-        #calculate mean full-width-half-maximum
-        FWHM=np.mean(peaks,axis=0)[2]
-        #create the initial list of parameters
-        params=[peaks[1][1],peaks[4][1]-peaks[1][1],(peaks[2][1]-peaks[0][1])/2.,(peaks[5][1]-peaks[3][1])/2.,FWHM,0,0]
-        for peak in peaks:
+        params=[]
+        for peak in self.Fitter.peaks:        
             params.append(peak[0])
-        for i in xrange(13):
+            params.append(peak[1])
+            params.append(peak[2]/(2*np.sqrt(2*np.log(2))))
+        for i in xrange(len(params)):
             self.params[i]=params[i]
             self.TF1.SetParameter(i, self.params[i])
-    def getXLockPoint(self, ratio, D199_204=97):
-        '''Get a point on the x-axis from 'ratio', which is the position
-        relative to the Hg199 peak divided by the splitting between 199 and 204 
-        (D199_204).'''
-        return self.params[0]+ float(ratio)/D199_204 * self.params[1]
-    def getYLockPoint(self, ratio, D199_204=97):
-        '''Get the function value at the point returned by getXLockPoint(self,
-        ratio, D199_204).'''
-        return self.evaluate(self.getXLockPoint(ratio, D199_204))
-    def getLockPointSlope(self, ratio, D199_204=97):
-        '''Get the slope of the function at the point returned by 
-        getXLockPoint(self, ratio, D199_204).'''
-        return self.slope(self.getXLockPoint(ratio,D199_204))
-    def getRatioTo199_204(self, x, D199_204=97):
-        '''Get the ratio of an x-value normalized to the given D199_204.'''
-        return float(x)/self.params[1]*D199_204
+    def setParNames(self):
+        self.parnames=[]
+        for i in xrange(len(self.Fitter.peaks)):
+            self.parnames+=["height%d" % (i), "center%d" % (i), "sigma%d" % (i)]
+            for j in (0,1,2):
+                self.TF1.SetParName(3*i+j, self.parnames[3*i+j])
+    def paramsToPeaks(self, pars, errs):
+        for i in xrange(self.numFPars/3):
+            self.Fitter.peaks[i][0]=pars[i]
+            self.Fitter.peaks[i][1]=pars[i+1]
+            self.Fitter.peaks[i][2]=pars[i+2]*2*np.sqrt(2*np.log(2))
+            self.Fitter.errors[i][0]=errs[i]
+            self.Fitter.errors[i][1]=errs[i+1]
+            self.Fitter.errors[i][2]=errs[i+2]*2*np.sqrt(2*np.log(2))            
+
+class Lorentzian(ForegroundModel):      
+    def makeString(self):
+        string=""
+        for i in xrange(len(self.Fitter.peaks)):
+                string+="+[%d]*TMath::Pi()*[%d]*0.5*TMath::CauchyDist(x,[%d],[%d]*0.5)" % (i*3,i*3+2,i*3+1,i*3+2)
+        return string[1:]
+    def setInitialValues(self):
+        params=np.ravel(self.Fitter.peaks)
+        for i in xrange(len(params)):
+            self.params[i]=params[i]
+            self.TF1.SetParameter(i, self.params[i])
+    def setParNames(self):
+        self.parnames=[]
+        for i in xrange(len(self.Fitter.peaks)):
+            self.parnames+=["height%d" % (i), "center%d" % (i), "width%d" % (i)]
+            for j in (0,1,2):
+                self.TF1.SetParName(3*i+j, self.parnames[3*i+j])
+    def paramsToPeaks(self, pars, errs):
+        for i in xrange(self.numFPars/3):
+            self.Fitter.peaks[i][0]=pars[3*i]
+            self.Fitter.peaks[i][1]=pars[3*i+1]
+            self.Fitter.peaks[i][2]=pars[3*i+2]
+            self.Fitter.errors[i][0]=errs[3*i]
+            self.Fitter.errors[i][1]=errs[3*i+1]
+            self.Fitter.errors[i][2]=errs[3*i+2]           
+
 
 class Hg199_204_Voigt(ForegroundModel):
     '''Voigt profiles with minimal parametrization:
@@ -484,62 +461,6 @@ class Hg199_204_Voigt2(ForegroundModel):
     def getRatioTo199_204(self, x, D199_204=97):
         '''Get the ratio of an x-value normalized to the given D199_204.'''
         return float(x)/self.params[1]*D199_204
-
-class Gaussian(ForegroundModel):
-    def makeString(self):
-        string=""
-        for i in xrange(len(self.Fitter.peaks)):
-            string+="+gaus(%d)" % (i*3)
-        return string[1:]
-    def setInitialValues(self):
-        params=[]
-        for peak in self.Fitter.peaks:        
-            params.append(peak[0])
-            params.append(peak[1])
-            params.append(peak[2]/(2*np.sqrt(2*np.log(2))))
-        for i in xrange(len(params)):
-            self.params[i]=params[i]
-            self.TF1.SetParameter(i, self.params[i])
-    def setParNames(self):
-        self.parnames=[]
-        for i in xrange(len(self.Fitter.peaks)):
-            self.parnames+=["height%d" % (i), "center%d" % (i), "sigma%d" % (i)]
-            for j in (0,1,2):
-                self.TF1.SetParName(3*i+j, self.parnames[3*i+j])
-    def paramsToPeaks(self, pars, errs):
-        for i in xrange(self.numFPars/3):
-            self.Fitter.peaks[i][0]=pars[i]
-            self.Fitter.peaks[i][1]=pars[i+1]
-            self.Fitter.peaks[i][2]=pars[i+2]*2*np.sqrt(2*np.log(2))
-            self.Fitter.errors[i][0]=errs[i]
-            self.Fitter.errors[i][1]=errs[i+1]
-            self.Fitter.errors[i][2]=errs[i+2]*2*np.sqrt(2*np.log(2))            
-
-class Lorentzian(ForegroundModel):      
-    def makeString(self):
-        string=""
-        for i in xrange(len(self.Fitter.peaks)):
-                string+="+[%d]*TMath::Pi()*[%d]*0.5*TMath::CauchyDist(x,[%d],[%d]*0.5)" % (i*3,i*3+2,i*3+1,i*3+2)
-        return string[1:]
-    def setInitialValues(self):
-        params=np.ravel(self.Fitter.peaks)
-        for i in xrange(len(params)):
-            self.params[i]=params[i]
-            self.TF1.SetParameter(i, self.params[i])
-    def setParNames(self):
-        self.parnames=[]
-        for i in xrange(len(self.Fitter.peaks)):
-            self.parnames+=["height%d" % (i), "center%d" % (i), "width%d" % (i)]
-            for j in (0,1,2):
-                self.TF1.SetParName(3*i+j, self.parnames[3*i+j])
-    def paramsToPeaks(self, pars, errs):
-        for i in xrange(self.numFPars/3):
-            self.Fitter.peaks[i][0]=pars[3*i]
-            self.Fitter.peaks[i][1]=pars[3*i+1]
-            self.Fitter.peaks[i][2]=pars[3*i+2]
-            self.Fitter.errors[i][0]=errs[3*i]
-            self.Fitter.errors[i][1]=errs[3*i+1]
-            self.Fitter.errors[i][2]=errs[3*i+2]           
 
 #Sample for creating new models
 

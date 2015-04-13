@@ -159,6 +159,9 @@ class SpecFitter:
     def signalToNoise(self):
         '''Returns the estimated signal-to-noise ratio'''
         return self.peaks[:,0].max()/self.noise
+    def save(self,fname):
+        d=np.array([self.raw_data[0],self.raw_data[1],self.getTheoryArray()[1],self.raw_residuals[1]])
+        np.savetxt(fname, d.T)
     def draw(self):
         '''Draw data with fit, residuals, normal probability plot and 
         background'''
@@ -186,10 +189,10 @@ class SpecFitter:
 
 
 #quickstart
-#d=np.loadtxt('time0.txt')
-#d=d[:,:]
-#s=SpecFitter([d[0],d[1]],numpeaks=6, FModel=Hg199_204, BModel=Linear)
-#s.fit()
+d=np.loadtxt('spectrum11.txt')
+d=d[:,:]
+s=SpecFitter([d[0],d[1]],numpeaks=6, FModel=Hg199_204, BModel=Linear)
+s.fit()
 
 #d=np.load('26_11_bigcell_mag1.24A.npy')
 #d=d[:,200:600]

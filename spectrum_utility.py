@@ -10,6 +10,27 @@ from ROOT import TGraph, TGraphErrors, TCanvas
 
 #--------------------UTILITY FUNCTIONS--------------------
 
+def enhancedDerivative(data,win_len=31):
+    pts=len(data[0])
+    x=np.array(data[0])
+    y=np.array(data[1])
+    d=[0]    
+    #d is a discrete derivative of data
+    for i in xrange(pts-1):
+        if x[i+1]==x[i]:
+            d.append(0)
+            continue
+        d.append((y[i+1]-y[i])/(x[i+1]-x[i]))
+    #create a spectrum containing the sum of values 
+    #within a window around the center point    
+    half_width=int(win_len/2)
+    enhanced=[0]*half_width
+    for i in xrange(half_width,pts-half_width):
+        window=np.array(d[i-half_width:i+half_width+1])
+        enhanced.append(window.sum())
+    enhanced+=[0]*half_width
+    return np.array(enhanced)    
+    
 def removePeaks(data):
     pts=len(data[0])
     #need x and y as lists in order to use the .remove method
@@ -51,31 +72,10 @@ def removePeaks(data):
     mdev=np.median(res)
     return np.array([x,y])[:,res<5*mdev]
 
-def enhancedDerivative(data,win_len=31):
-    pts=len(data[0])
-    x=np.array(data[0])
-    y=np.array(data[1])
-    profile=[0]    
-    #profile is sort of a discrete derivative of data
-    for i in xrange(pts-1):
-        if x[i+1]==x[i]:
-            profile.append(0)
-            continue
-        profile.append((y[i+1]-y[i])/(x[i+1]-x[i]))
-    #create a spectrum containing the sum of values 
-    #within a window around the center point    
-    win_width=int(win_len/2)
-    enhanced=[0]*win_width
-    for i in xrange(win_width,pts-win_width):
-        window=np.array(profile[i-win_width:i+win_width])
-        enhanced.append(window.sum())
-    enhanced+=[0]*win_width
-    return np.array(enhanced)    
-
 def findPeaks(data,show=False,win_len=31):
     '''Returns [height, center, width] of all peaks by looking for 
     zeros of the first derivative. Expects a signal without background, i.e. 
-    level should be zero and no drifts.'''
+    level at zero and no drifts.'''
     x=np.array(data[0])
     y=np.array(data[1])
     pts=len(data[0])
